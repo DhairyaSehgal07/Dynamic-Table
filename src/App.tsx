@@ -6,6 +6,7 @@ import {
   getSortedRowModel,
   useReactTable,
   type SortingState,
+  type VisibilityState,
 } from '@tanstack/react-table'
 import {
   Table,
@@ -19,6 +20,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Search, ArrowUpDown, ArrowDown, ArrowUp } from 'lucide-react'
 import { farmerTableData, type FarmerTableRecord } from '@/data/farmer-table-data'
+import { SheetDemoButton } from '@/components/sheet-demo-button'
 
 const columnHelper = createColumnHelper<FarmerTableRecord>()
 
@@ -73,17 +75,18 @@ const columns = [
 
 export default function App() {
   const [data] = React.useState(() => [...farmerTableData])
-  // 1. Initialize sorting state
   const [sorting, setSorting] = React.useState<SortingState>([])
+  const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
 
   const table = useReactTable({
     data,
     columns,
-    // 2. Pass sorting state and row models
     state: {
       sorting,
+      columnVisibility,
     },
     onSortingChange: setSorting,
+    onColumnVisibilityChange: setColumnVisibility,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
   })
@@ -94,9 +97,12 @@ export default function App() {
       {/* Fake Toolbar */}
       <div className="flex items-center justify-between bg-white p-3 border rounded-t-lg border-b-0 shadow-sm">
         <h2 className="text-lg font-semibold text-slate-800">Inward Ledger</h2>
-        <div className="relative w-64">
-          <Search className="absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
-          <Input placeholder="Search gate pass..." className="pl-8 h-9 text-sm rounded-md" />
+        <div className="flex items-center gap-2">
+          <div className="relative w-64">
+            <Search className="absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
+            <Input placeholder="Search gate pass..." className="pl-8 h-9 text-sm rounded-md" />
+          </div>
+          <SheetDemoButton table={table} />
         </div>
       </div>
 
@@ -164,7 +170,7 @@ export default function App() {
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={columns.length} className="h-24 text-center text-slate-500">
+                <TableCell colSpan={table.getVisibleLeafColumns().length} className="h-24 text-center text-slate-500">
                   No records found.
                 </TableCell>
               </TableRow>
