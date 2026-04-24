@@ -40,17 +40,32 @@ import {
   Calendar as CalendarIcon,
   GripVertical,
   Search,
-  PlusCircle
+  PlusCircle,
+  ChevronDown,
 } from 'lucide-react'
 import type { FarmerTableRecord } from '@/data/farmer-table-data'
-
-const varieties = ['Basmati', 'Sharbati', 'Sona Masoori', 'IR-64', 'PR-126']
 
 type SheetDemoButtonProps = {
   table: TanstackTable<FarmerTableRecord>
 }
 
 type StatusFilterValue = 'GRADED' | 'NOT_GRADED'
+type FilterableColumnId =
+  | 'gatePassNumber'
+  | 'date'
+  | 'farmer'
+  | 'variety'
+  | 'bags'
+  | 'netWeight'
+
+const filterableColumns: Array<{ id: FilterableColumnId; label: string; searchable: boolean }> = [
+  { id: 'gatePassNumber', label: 'Gate Pass Number', searchable: true },
+  { id: 'date', label: 'Date', searchable: true },
+  { id: 'farmer', label: 'Farmers', searchable: true },
+  { id: 'variety', label: 'Crop Variety', searchable: true },
+  { id: 'bags', label: 'Bags', searchable: true },
+  { id: 'netWeight', label: 'Net Weight (kg)', searchable: true },
+]
 
 type SortableColumnRowProps = {
   columnId: string
@@ -106,17 +121,59 @@ function SortableColumnRow({
 
 export function SheetDemoButton({ table }: SheetDemoButtonProps) {
   const [isOpen, setIsOpen] = React.useState(false)
+  const [searchQueries, setSearchQueries] = React.useState<Record<FilterableColumnId, string>>({
+    gatePassNumber: '',
+    date: '',
+    farmer: '',
+    variety: '',
+    bags: '',
+    netWeight: '',
+  })
+  const [expandedFilters, setExpandedFilters] = React.useState<Record<FilterableColumnId, boolean>>({
+    gatePassNumber: false,
+    date: false,
+    farmer: false,
+    variety: false,
+    bags: false,
+    netWeight: false,
+  })
   const [draftColumnVisibility, setDraftColumnVisibility] = React.useState<Record<string, boolean>>({})
   const [draftColumnOrder, setDraftColumnOrder] = React.useState<string[]>([])
   const [draftStatusFilters, setDraftStatusFilters] = React.useState<StatusFilterValue[]>([
     'GRADED',
     'NOT_GRADED',
   ])
+  const [draftValueFilters, setDraftValueFilters] = React.useState<Record<FilterableColumnId, string[]>>({
+    gatePassNumber: [],
+    date: [],
+    farmer: [],
+    variety: [],
+    bags: [],
+    netWeight: [],
+  })
   const sensors = useSensors(
     useSensor(MouseSensor),
     useSensor(TouchSensor),
     useSensor(KeyboardSensor),
   )
+  const availableFilterOptions = React.useMemo(() => {
+    const options: Record<FilterableColumnId, string[]> = {
+      gatePassNumber: [],
+      date: [],
+      farmer: [],
+      variety: [],
+      bags: [],
+      netWeight: [],
+    }
+
+    filterableColumns.forEach(({ id }) => {
+      options[id] = Array.from(
+        new Set(table.options.data.map((row) => String(row[id]))),
+      ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    })
+
+    return options
+  }, [table.options.data])
 
   const hidableColumns = table
     .getAllLeafColumns()
@@ -145,12 +202,46 @@ export function SheetDemoButton({ table }: SheetDemoButtonProps) {
     } else {
       setDraftStatusFilters(['GRADED', 'NOT_GRADED'])
     }
+
+    const nextValueFilters: Record<FilterableColumnId, string[]> = {
+      gatePassNumber: [],
+      date: [],
+      farmer: [],
+      variety: [],
+      bags: [],
+      netWeight: [],
+    }
+    filterableColumns.forEach(({ id }) => {
+      const rawFilter = table.getColumn(id)?.getFilterValue()
+      if (Array.isArray(rawFilter)) {
+        nextValueFilters[id] = rawFilter.map((value) => String(value))
+      } else {
+        nextValueFilters[id] = [...availableFilterOptions[id]]
+      }
+    })
+    setDraftValueFilters(nextValueFilters)
   }
 
   const handleOpenChange = (nextOpen: boolean) => {
     setIsOpen(nextOpen)
     if (nextOpen) {
       syncDraftFromTable()
+      setSearchQueries({
+        gatePassNumber: '',
+        date: '',
+        farmer: '',
+        variety: '',
+        bags: '',
+        netWeight: '',
+      })
+      setExpandedFilters({
+        gatePassNumber: false,
+        date: false,
+        farmer: false,
+        variety: false,
+        bags: false,
+        netWeight: false,
+      })
     }
   }
 
@@ -190,6 +281,16 @@ export function SheetDemoButton({ table }: SheetDemoButtonProps) {
     } else {
       statusColumn?.setFilterValue(draftStatusFilters)
     }
+    filterableColumns.forEach(({ id }) => {
+      const column = table.getColumn(id)
+      const selectedValues = draftValueFilters[id]
+      const allValues = availableFilterOptions[id]
+      if (selectedValues.length === allValues.length) {
+        column?.setFilterValue(undefined)
+      } else {
+        column?.setFilterValue(selectedValues)
+      }
+    })
     setIsOpen(false)
   }
 
@@ -201,6 +302,54 @@ export function SheetDemoButton({ table }: SheetDemoButtonProps) {
       }
       return current.filter((value) => value !== status)
     })
+  }
+
+  const toggleValueDraft = (columnId: FilterableColumnId, value: string, checked: boolean) => {
+    setDraftValueFilters((current) => {
+      const currentValues = current[columnId]
+      if (checked) {
+        if (currentValues.includes(value)) return current
+        return {
+          ...current,
+          [columnId]: [...currentValues, value],
+        }
+      }
+      return {
+        ...current,
+        [columnId]: currentValues.filter((currentValue) => currentValue !== value),
+      }
+    })
+  }
+
+  const handleToggleAllValues = (columnId: FilterableColumnId) => {
+    const allValues = availableFilterOptions[columnId]
+    const selectedValues = draftValueFilters[columnId]
+    const areAllSelected = allValues.length > 0 && selectedValues.length === allValues.length
+    setDraftValueFilters((current) => ({
+      ...current,
+      [columnId]: areAllSelected ? [] : [...allValues],
+    }))
+  }
+
+  const toggleFilterSection = (columnId: FilterableColumnId) => {
+    setExpandedFilters((current) => ({
+      ...current,
+      [columnId]: !current[columnId],
+    }))
+  }
+
+  const setColumnSearchQuery = (columnId: FilterableColumnId, value: string) => {
+    setSearchQueries((current) => ({
+      ...current,
+      [columnId]: value,
+    }))
+  }
+
+  const getFilteredOptionsForColumn = (columnId: FilterableColumnId) => {
+    const query = searchQueries[columnId].trim().toLowerCase()
+    const allValues = availableFilterOptions[columnId]
+    if (!query) return allValues
+    return allValues.filter((option) => option.toLowerCase().includes(query))
   }
 
   const handleColumnDragEnd = (event: DragEndEvent) => {
@@ -328,33 +477,78 @@ export function SheetDemoButton({ table }: SheetDemoButtonProps) {
                 </div>
               </div>
 
-              {/* Variety - Searchable List Model */}
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <Label className="text-sm font-bold text-slate-700 uppercase tracking-wider">Crop Variety</Label>
-                  <span className="text-xs text-blue-600 font-medium">2 selected</span>
-                </div>
-                <div className="bg-white border border-slate-200 rounded-md shadow-sm overflow-hidden">
-                  <div className="relative border-b border-slate-100">
-                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                    <Input
-                      placeholder="Search varieties..."
-                      className="pl-9 border-0 rounded-none h-10 shadow-none focus-visible:ring-0 text-sm"
-                    />
-                  </div>
-                  <div className="max-h-[160px] overflow-y-auto p-2 space-y-1">
-                    {varieties.map((variety) => (
-                      <label key={variety} className="flex items-center space-x-3 p-2 hover:bg-slate-50 rounded cursor-pointer">
-                        <Checkbox
-                          id={`variety-${variety}`}
-                          defaultChecked={variety === 'Basmati' || variety === 'Sharbati'}
+              {filterableColumns.map(({ id, label, searchable }) => {
+                const selectedCount = draftValueFilters[id].length
+                const allValues = availableFilterOptions[id]
+                const filteredValues = getFilteredOptionsForColumn(id)
+                const isExpanded = expandedFilters[id]
+                const areAllSelected =
+                  allValues.length > 0 && selectedCount === allValues.length
+
+                return (
+                  <div key={id} className="space-y-3">
+                    <button
+                      type="button"
+                      className="w-full flex items-center justify-between"
+                      onClick={() => toggleFilterSection(id)}
+                    >
+                      <Label className="cursor-pointer text-sm font-bold text-slate-700 uppercase tracking-wider">
+                        {label}
+                      </Label>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-blue-600 font-medium">
+                          {selectedCount} selected
+                        </span>
+                        <ChevronDown
+                          className={`h-4 w-4 text-slate-500 transition-transform ${
+                            isExpanded ? 'rotate-180' : ''
+                          }`}
                         />
-                        <span className="text-sm font-medium text-slate-700">{variety}</span>
-                      </label>
-                    ))}
+                      </div>
+                    </button>
+                    {isExpanded && (
+                      <div className="bg-white border border-slate-200 rounded-md shadow-sm overflow-hidden">
+                        {searchable && (
+                          <div className="relative border-b border-slate-100">
+                            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                            <Input
+                              value={searchQueries[id]}
+                              onChange={(event) =>
+                                setColumnSearchQuery(id, event.target.value)
+                              }
+                              placeholder={`Search ${label.toLowerCase()}...`}
+                              className="pl-9 border-0 rounded-none h-10 shadow-none focus-visible:ring-0 text-sm"
+                            />
+                          </div>
+                        )}
+                        <div className="max-h-[280px] overflow-y-auto p-2 space-y-1">
+                          {filteredValues.map((value) => (
+                            <label key={value} className="flex items-center space-x-3 p-2 hover:bg-slate-50 rounded cursor-pointer">
+                              <Checkbox
+                                id={`${id}-${value}`}
+                                checked={draftValueFilters[id].includes(value)}
+                                onCheckedChange={(checked) =>
+                                  toggleValueDraft(id, value, !!checked)
+                                }
+                              />
+                              <span className="text-sm font-medium text-slate-700">{value}</span>
+                            </label>
+                          ))}
+                        </div>
+                        <div className="px-3 py-2 border-t border-slate-100">
+                          <button
+                            type="button"
+                            className="text-xs text-blue-600 font-medium hover:text-blue-700"
+                            onClick={() => handleToggleAllValues(id)}
+                          >
+                            {areAllSelected ? 'Deselect All' : 'Select All'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-              </div>
+                )
+              })}
 
             </TabsContent>
 

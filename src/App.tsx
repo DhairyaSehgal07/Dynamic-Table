@@ -25,6 +25,16 @@ import { farmerTableData, type FarmerTableRecord } from '@/data/farmer-table-dat
 import { SheetDemoButton } from '@/components/sheet-demo-button'
 
 const columnHelper = createColumnHelper<FarmerTableRecord>()
+const multiValueFilterFn = (
+  row: { getValue: (columnId: string) => unknown },
+  columnId: string,
+  filterValue: string[],
+) => {
+  const cellValue = String(row.getValue(columnId))
+  if (!Array.isArray(filterValue)) return true
+  if (filterValue.length === 0) return false
+  return filterValue.includes(cellValue)
+}
 
 // --- Enhanced Column Definitions with Sorting ---
 const columns = [
@@ -32,31 +42,37 @@ const columns = [
     header: 'Gate Pass',
     cell: (info) => <span className="font-medium text-slate-700">{info.getValue()}</span>,
     sortingFn: 'alphanumeric', // Sort strings alphabetically (handles mixed numbers well)
+    filterFn: multiValueFilterFn,
   }),
   columnHelper.accessor('date', {
     header: 'Date',
     cell: (info) => <span className="text-slate-500">{info.getValue()}</span>,
     sortingFn: 'datetime', // Optimized for date sorting
+    filterFn: multiValueFilterFn,
   }),
   columnHelper.accessor('farmer', {
     header: 'Farmer',
     cell: (info) => info.getValue(),
     sortingFn: 'text', // Strict alphabetical sorting
+    filterFn: multiValueFilterFn,
   }),
   columnHelper.accessor('variety', {
     header: 'Variety',
     cell: (info) => info.getValue(),
     sortingFn: 'text',
+    filterFn: multiValueFilterFn,
   }),
   columnHelper.accessor('bags', {
     header: () => <div className="w-full text-right">Bags</div>,
     cell: (info) => <div className="text-right tabular-nums">{info.getValue()}</div>,
     sortingFn: 'basic', // Standard number comparison
+    filterFn: multiValueFilterFn,
   }),
   columnHelper.accessor('netWeight', {
     header: () => <div className="w-full text-right">Net Wt. (kg)</div>,
     cell: (info) => <div className="text-right tabular-nums font-medium">{info.getValue()}</div>,
     sortingFn: 'basic',
+    filterFn: multiValueFilterFn,
   }),
   columnHelper.accessor('status', {
     header: 'Status',
@@ -203,6 +219,13 @@ export default function App() {
           </TableBody>
         </Table>
       </div>
+
+      <h1> Feature given by Lokesh bhai: </h1>
+      <ol>
+        <li>Column Sizing</li>
+        <li>Grouping</li>
+        <li>Virtualised Rows</li>
+      </ol>
 
       {/* Fake Footer/Pagination */}
       <div className="flex items-center justify-between text-sm text-slate-500 px-1">
