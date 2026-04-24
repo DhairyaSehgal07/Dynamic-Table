@@ -11,6 +11,7 @@ import {
   getExpandedRowModel,
   getFacetedRowModel,
   getFacetedUniqueValues,
+  getFilteredRowModel,
   getGroupedRowModel,
   getSortedRowModel,
   useReactTable,
@@ -29,9 +30,14 @@ const columnHelper = createColumnHelper<FarmerTableRecord>()
 const multiValueFilterFn = (
   row: { getValue: (columnId: string) => unknown },
   columnId: string,
-  filterValue: string[],
+  filterValue: string[] | string,
 ) => {
   const cellValue = String(row.getValue(columnId))
+  if (typeof filterValue === 'string') {
+    const normalized = filterValue.trim().toLowerCase()
+    if (!normalized) return true
+    return cellValue.toLowerCase().includes(normalized)
+  }
   if (!Array.isArray(filterValue)) return true
   if (filterValue.length === 0) return false
   return filterValue.includes(cellValue)
@@ -110,6 +116,38 @@ const defaultColumnOrder = [
 
 type FilterLogic = 'and' | 'or'
 
+function DebouncedInput({
+  value: initialValue,
+  onChange,
+  debounce = 350,
+  ...props
+}: {
+  value: string | number
+  onChange: (value: string) => void
+  debounce?: number
+} & Omit<React.ComponentProps<typeof Input>, 'value' | 'onChange'>) {
+  const [value, setValue] = React.useState(String(initialValue))
+
+  React.useEffect(() => {
+    setValue(String(initialValue))
+  }, [initialValue])
+
+  React.useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      onChange(value)
+    }, debounce)
+    return () => window.clearTimeout(timeout)
+  }, [value, debounce, onChange])
+
+  return (
+    <Input
+      {...props}
+      value={value}
+      onChange={(event) => setValue(event.target.value)}
+    />
+  )
+}
+
 export default function App() {
   const [data] = React.useState(() => [...farmerTableData])
   const [sorting, setSorting] = React.useState<SortingState>([])
@@ -117,6 +155,8 @@ export default function App() {
   const [columnOrder, setColumnOrder] = React.useState<string[]>(defaultColumnOrder)
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
   const [grouping, setGrouping] = React.useState<GroupingState>([])
+  const [gatePassSearch, setGatePassSearch] = React.useState('')
+  const [globalFilter, setGlobalFilter] = React.useState('')
   const [filterLogic, setFilterLogic] = React.useState<FilterLogic>('and')
   const [columnResizeMode, setColumnResizeMode] = React.useState<ColumnResizeMode>('onChange')
   const [columnResizeDirection, setColumnResizeDirection] =
@@ -124,30 +164,8 @@ export default function App() {
   const tableContainerRef = React.useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = React.useState(0)
 
-  const filteredData = React.useMemo(() => {
-    if (columnFilters.length === 0) return data
-
-    const activeFilters = columnFilters.filter((filter) => Array.isArray(filter.value))
-
-    if (activeFilters.length === 0) return data
-
-    const matchesFilter = (row: FarmerTableRecord, filter: ColumnFiltersState[number]) => {
-      const selectedValues = filter.value as unknown[]
-      if (selectedValues.length === 0) return false
-      const rowValue = String(row[filter.id as keyof FarmerTableRecord])
-      return selectedValues.map((value) => String(value)).includes(rowValue)
-    }
-
-    return data.filter((row) => {
-      if (filterLogic === 'or') {
-        return activeFilters.some((filter) => matchesFilter(row, filter))
-      }
-      return activeFilters.every((filter) => matchesFilter(row, filter))
-    })
-  }, [data, columnFilters, filterLogic])
-
   const table = useReactTable({
-    data: filteredData,
+    data,
     columns,
     state: {
       sorting,
@@ -155,15 +173,23 @@ export default function App() {
       columnOrder,
       columnFilters,
       grouping,
+      globalFilter,
     },
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
     onColumnOrderChange: setColumnOrder,
     onColumnFiltersChange: setColumnFilters,
     onGroupingChange: setGrouping,
+    onGlobalFilterChange: setGlobalFilter,
     columnResizeMode,
     columnResizeDirection,
+    globalFilterFn: (row, _columnId, filterValue: string) => {
+      const normalized = filterValue.trim().toLowerCase()
+      if (!normalized) return true
+      return String(row.original.gatePassNumber).toLowerCase().includes(normalized)
+    },
     getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
     getFacetedRowModel: getFacetedRowModel(),
     getFacetedUniqueValues: getFacetedUniqueValues(),
     getSortedRowModel: getSortedRowModel(),
@@ -275,7 +301,15 @@ export default function App() {
         <div className="flex items-center gap-2">
           <div className="relative w-64">
             <Search className="absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
-            <Input placeholder="Search gate pass..." className="pl-8 h-9 text-sm rounded-md" />
+            <DebouncedInput
+              value={gatePassSearch}
+              onChange={(value) => {
+                setGatePassSearch(value)
+                table.setGlobalFilter(value)
+              }}
+              placeholder="Search gate pass..."
+              className="pl-8 h-9 text-sm rounded-md"
+            />
           </div>
           <SheetDemoButton
             table={table}
