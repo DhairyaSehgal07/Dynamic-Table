@@ -51,6 +51,9 @@ import type { FarmerTableRecord } from '@/data/farmer-table-data'
 
 type SheetDemoButtonProps = {
   table: TanstackTable<FarmerTableRecord>
+  defaultColumnOrder: string[]
+  filterLogic: 'and' | 'or'
+  setFilterLogic: React.Dispatch<React.SetStateAction<'and' | 'or'>>
   columnResizeMode: ColumnResizeMode
   setColumnResizeMode: React.Dispatch<React.SetStateAction<ColumnResizeMode>>
   columnResizeDirection: ColumnResizeDirection
@@ -129,6 +132,9 @@ function SortableColumnRow({
 
 export function SheetDemoButton({
   table,
+  defaultColumnOrder,
+  filterLogic,
+  setFilterLogic,
   columnResizeMode,
   setColumnResizeMode,
   columnResizeDirection,
@@ -165,29 +171,29 @@ export function SheetDemoButton({
     bags: [],
     netWeight: [],
   })
+  const [draftFilterLogic, setDraftFilterLogic] = React.useState<'and' | 'or'>(filterLogic)
   const sensors = useSensors(
     useSensor(MouseSensor),
     useSensor(TouchSensor),
     useSensor(KeyboardSensor),
   )
-  const availableFilterOptions = React.useMemo(() => {
-    const options: Record<FilterableColumnId, string[]> = {
-      gatePassNumber: [],
-      date: [],
-      farmer: [],
-      variety: [],
-      bags: [],
-      netWeight: [],
+  const availableFilterOptions: Record<FilterableColumnId, string[]> = {
+    gatePassNumber: [],
+    date: [],
+    farmer: [],
+    variety: [],
+    bags: [],
+    netWeight: [],
+  }
+
+  filterableColumns.forEach(({ id }) => {
+    const facetedValues = table.getColumn(id)?.getFacetedUniqueValues()
+    if (facetedValues) {
+      availableFilterOptions[id] = Array.from(facetedValues.keys())
+        .map((value) => String(value))
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
     }
-
-    filterableColumns.forEach(({ id }) => {
-      options[id] = Array.from(
-        new Set(table.options.data.map((row) => String(row[id]))),
-      ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-    })
-
-    return options
-  }, [table.options.data])
+  })
 
   const hidableColumns = table
     .getAllLeafColumns()
@@ -204,7 +210,8 @@ export function SheetDemoButton({
       nextDraft[column.id] = column.getIsVisible()
     })
     const activeOrder = table.getState().columnOrder
-    const validOrder = activeOrder.filter((id) => hidableColumnIds.includes(id))
+    const baseOrder = activeOrder.length > 0 ? activeOrder : defaultColumnOrder
+    const validOrder = baseOrder.filter((id) => hidableColumnIds.includes(id))
     const missing = hidableColumnIds.filter((id) => !validOrder.includes(id))
 
     setDraftColumnVisibility(nextDraft)
@@ -240,6 +247,7 @@ export function SheetDemoButton({
     setIsOpen(nextOpen)
     if (nextOpen) {
       syncDraftFromTable()
+      setDraftFilterLogic(filterLogic)
       setSearchQueries({
         gatePassNumber: '',
         date: '',
@@ -277,13 +285,54 @@ export function SheetDemoButton({
   }
 
   const handleClearAll = () => {
-    setDraftColumnVisibility((current) => {
-      const next = { ...current }
-      hidableColumns.forEach((column) => {
-        next[column.id] = false
-      })
-      return next
+    const resetVisibility: Record<string, boolean> = {}
+    hidableColumns.forEach((column) => {
+      resetVisibility[column.id] = true
     })
+
+    const resetOrderBase = defaultColumnOrder.length > 0 ? defaultColumnOrder : hidableColumnIds
+    const resetOrder = [
+      ...resetOrderBase.filter((id) => hidableColumnIds.includes(id)),
+      ...hidableColumnIds.filter((id) => !resetOrderBase.includes(id)),
+    ]
+
+    const resetValueFilters: Record<FilterableColumnId, string[]> = {
+      gatePassNumber: [...availableFilterOptions.gatePassNumber],
+      date: [...availableFilterOptions.date],
+      farmer: [...availableFilterOptions.farmer],
+      variety: [...availableFilterOptions.variety],
+      bags: [...availableFilterOptions.bags],
+      netWeight: [...availableFilterOptions.netWeight],
+    }
+
+    setDraftColumnVisibility(resetVisibility)
+    setDraftColumnOrder(resetOrder)
+    setDraftStatusFilters(['GRADED', 'NOT_GRADED'])
+    setDraftValueFilters(resetValueFilters)
+    setDraftFilterLogic('and')
+    setSearchQueries({
+      gatePassNumber: '',
+      date: '',
+      farmer: '',
+      variety: '',
+      bags: '',
+      netWeight: '',
+    })
+    setExpandedFilters({
+      gatePassNumber: false,
+      date: false,
+      farmer: false,
+      variety: false,
+      bags: false,
+      netWeight: false,
+    })
+
+    table.setColumnVisibility({})
+    table.setColumnOrder(resetOrder)
+    table.resetColumnFilters()
+    setFilterLogic('and')
+    setColumnResizeMode('onChange')
+    setColumnResizeDirection('ltr')
   }
 
   const handleApplyView = () => {
@@ -305,6 +354,7 @@ export function SheetDemoButton({
         column?.setFilterValue(selectedValues)
       }
     })
+    setFilterLogic(draftFilterLogic)
     setIsOpen(false)
   }
 
@@ -405,7 +455,7 @@ export function SheetDemoButton({
       */}
       <SheetContent
         side="right"
-        className="flex flex-col w-full sm:max-w-[500px] p-0 gap-0 bg-slate-50/50 border-l"
+        className="flex flex-col w-full sm:max-w-[680px] p-0 gap-0 bg-slate-50/50 border-l"
       >
         {/* --- STICKY HEADER --- */}
         <div className="px-6 py-5 border-b border-slate-200 bg-white">
@@ -444,6 +494,29 @@ export function SheetDemoButton({
 
             {/* TAB 1: FILTERS */}
             <TabsContent value="filters" className="m-0 space-y-8 focus-visible:ring-0">
+              <div className="space-y-3">
+                <Label className="text-sm font-bold text-slate-700 uppercase tracking-wider">
+                  Match Logic
+                </Label>
+                <div className="grid grid-cols-2 gap-2 rounded-md border border-slate-200 bg-white p-1 shadow-sm">
+                  <Button
+                    type="button"
+                    variant={draftFilterLogic === 'and' ? 'default' : 'ghost'}
+                    className="h-9 text-xs font-semibold uppercase tracking-wide"
+                    onClick={() => setDraftFilterLogic('and')}
+                  >
+                    AND
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={draftFilterLogic === 'or' ? 'default' : 'ghost'}
+                    className="h-9 text-xs font-semibold uppercase tracking-wide"
+                    onClick={() => setDraftFilterLogic('or')}
+                  >
+                    OR
+                  </Button>
+                </div>
+              </div>
 
               {/* Date Range - Unified look */}
               <div className="space-y-3">

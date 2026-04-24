@@ -7,7 +7,8 @@ import {
   createColumnHelper,
   flexRender,
   getCoreRowModel,
-  getFilteredRowModel,
+  getFacetedRowModel,
+  getFacetedUniqueValues,
   getSortedRowModel,
   useReactTable,
   type ColumnFiltersState,
@@ -104,19 +105,44 @@ const defaultColumnOrder = [
   'status',
 ]
 
+type FilterLogic = 'and' | 'or'
+
 export default function App() {
   const [data] = React.useState(() => [...farmerTableData])
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
   const [columnOrder, setColumnOrder] = React.useState<string[]>(defaultColumnOrder)
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
+  const [filterLogic, setFilterLogic] = React.useState<FilterLogic>('and')
   const [columnResizeMode, setColumnResizeMode] = React.useState<ColumnResizeMode>('onChange')
   const [columnResizeDirection, setColumnResizeDirection] =
     React.useState<ColumnResizeDirection>('ltr')
   const tableContainerRef = React.useRef<HTMLDivElement>(null)
 
+  const filteredData = React.useMemo(() => {
+    if (columnFilters.length === 0) return data
+
+    const activeFilters = columnFilters.filter((filter) => Array.isArray(filter.value))
+
+    if (activeFilters.length === 0) return data
+
+    const matchesFilter = (row: FarmerTableRecord, filter: ColumnFiltersState[number]) => {
+      const selectedValues = filter.value as unknown[]
+      if (selectedValues.length === 0) return false
+      const rowValue = String(row[filter.id as keyof FarmerTableRecord])
+      return selectedValues.map((value) => String(value)).includes(rowValue)
+    }
+
+    return data.filter((row) => {
+      if (filterLogic === 'or') {
+        return activeFilters.some((filter) => matchesFilter(row, filter))
+      }
+      return activeFilters.every((filter) => matchesFilter(row, filter))
+    })
+  }, [data, columnFilters, filterLogic])
+
   const table = useReactTable({
-    data,
+    data: filteredData,
     columns,
     state: {
       sorting,
@@ -131,7 +157,8 @@ export default function App() {
     columnResizeMode,
     columnResizeDirection,
     getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
+    getFacetedRowModel: getFacetedRowModel(),
+    getFacetedUniqueValues: getFacetedUniqueValues(),
     getSortedRowModel: getSortedRowModel(),
   })
   const visibleColumns = table.getVisibleLeafColumns()
@@ -222,6 +249,9 @@ export default function App() {
           </div>
           <SheetDemoButton
             table={table}
+            defaultColumnOrder={defaultColumnOrder}
+            filterLogic={filterLogic}
+            setFilterLogic={setFilterLogic}
             columnResizeMode={columnResizeMode}
             setColumnResizeMode={setColumnResizeMode}
             columnResizeDirection={columnResizeDirection}
@@ -317,6 +347,7 @@ export default function App() {
       {/* Fake Footer/Pagination */}
       <div className="flex items-center justify-between text-sm text-slate-500 px-1">
         <span>Showing {rows.length} of {data.length} entries</span>
+        <span>Filters: Column-based</span>
       </div>
 
     </div>
