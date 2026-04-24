@@ -21,9 +21,11 @@ import {
   type VisibilityState,
 } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
+import { Document, Page, StyleSheet, Text, View, pdf } from '@react-pdf/renderer'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Search, ArrowUpDown, ArrowDown, ArrowUp } from 'lucide-react'
+import { Search, ArrowUpDown, ArrowDown, ArrowUp, FileText } from 'lucide-react'
 import { farmerTableData, type FarmerTableRecord } from '@/data/farmer-table-data'
 import { SheetDemoButton } from '@/components/sheet-demo-button'
 
@@ -33,6 +35,137 @@ const isFirefoxBrowser =
 const DEFAULT_COLUMN_SIZE = 180
 const DEFAULT_COLUMN_MIN_SIZE = 120
 const DEFAULT_COLUMN_MAX_SIZE = 360
+
+const pdfStyles = StyleSheet.create({
+  page: {
+    padding: 24,
+    fontSize: 10,
+    fontFamily: 'Helvetica',
+  },
+  title: {
+    fontSize: 16,
+    marginBottom: 6,
+    fontWeight: 'bold',
+  },
+  subtitle: {
+    fontSize: 10,
+    color: '#475569',
+    marginBottom: 12,
+  },
+  table: {
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+  },
+  row: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+  },
+  headerRow: {
+    backgroundColor: '#f1f5f9',
+  },
+  cell: {
+    paddingVertical: 6,
+    paddingHorizontal: 5,
+    borderRightWidth: 1,
+    borderRightColor: '#e2e8f0',
+  },
+  headerCellText: {
+    fontSize: 9,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+    color: '#334155',
+  },
+  cellText: {
+    color: '#0f172a',
+  },
+  numericCellText: {
+    textAlign: 'right',
+  },
+  rightBorderlessCell: {
+    borderRightWidth: 0,
+  },
+})
+
+const reportColumns: Array<{
+  key: keyof FarmerTableRecord
+  label: string
+  width: string
+  align?: 'left' | 'right'
+}> = [
+  { key: 'gatePassNumber', label: 'Gate Pass', width: '16%' },
+  { key: 'date', label: 'Date', width: '14%' },
+  { key: 'farmer', label: 'Farmer', width: '22%' },
+  { key: 'variety', label: 'Variety', width: '16%' },
+  { key: 'bags', label: 'Bags', width: '10%', align: 'right' },
+  { key: 'netWeight', label: 'Net Wt (kg)', width: '12%', align: 'right' },
+  { key: 'status', label: 'Status', width: '10%' },
+]
+
+function TableReportDocument({
+  rows,
+  generatedAt,
+}: {
+  rows: FarmerTableRecord[]
+  generatedAt: string
+}) {
+  return (
+    <Document>
+      <Page size="A4" orientation="landscape" style={pdfStyles.page}>
+        <Text style={pdfStyles.title}>Inward Ledger Report</Text>
+        <Text style={pdfStyles.subtitle}>
+          Generated: {generatedAt} | Total records: {rows.length}
+        </Text>
+        <View style={pdfStyles.table}>
+          <View style={[pdfStyles.row, pdfStyles.headerRow]}>
+            {reportColumns.map((column, index) => {
+              const cellStyle = {
+                ...pdfStyles.cell,
+                width: column.width,
+                ...(index === reportColumns.length - 1 ? pdfStyles.rightBorderlessCell : {}),
+              }
+              return (
+                <View
+                  key={column.key}
+                  style={cellStyle}
+                >
+                  <Text style={pdfStyles.headerCellText}>{column.label}</Text>
+                </View>
+              )
+            })}
+          </View>
+          {rows.map((record) => (
+            <View key={record.gatePassNumber} style={pdfStyles.row}>
+              {reportColumns.map((column, index) => {
+                const value = String(record[column.key]).replace('_', ' ')
+                const isNumeric = column.align === 'right'
+                const cellStyle = {
+                  ...pdfStyles.cell,
+                  width: column.width,
+                  ...(index === reportColumns.length - 1 ? pdfStyles.rightBorderlessCell : {}),
+                }
+                const textStyle = {
+                  ...pdfStyles.cellText,
+                  ...(isNumeric ? pdfStyles.numericCellText : {}),
+                }
+                return (
+                  <View
+                    key={`${record.gatePassNumber}-${String(column.key)}`}
+                    style={cellStyle}
+                  >
+                    <Text style={textStyle}>
+                      {value}
+                    </Text>
+                  </View>
+                )
+              })}
+            </View>
+          ))}
+        </View>
+      </Page>
+    </Document>
+  )
+}
 
 const multiValueFilterFn = (
   row: { getValue: (columnId: string) => unknown },
@@ -210,6 +343,37 @@ export default function App() {
 
   const visibleColumns = table.getVisibleLeafColumns()
   const rows = table.getRowModel().rows
+  const pdfRecords = React.useMemo(() => {
+    const leafRecords: FarmerTableRecord[] = []
+    const appendLeafRows = (inputRows: Row<FarmerTableRecord>[]) => {
+      inputRows.forEach((row) => {
+        if (row.subRows.length > 0) {
+          appendLeafRows(row.subRows as Row<FarmerTableRecord>[])
+          return
+        }
+        leafRecords.push(row.original)
+      })
+    }
+    appendLeafRows(rows)
+    return leafRecords
+  }, [rows])
+
+  const handleOpenPdfReport = React.useCallback(async () => {
+    if (pdfRecords.length === 0) return
+    const generatedAt = new Date().toLocaleString()
+    const blob = await pdf(
+      <TableReportDocument
+        rows={pdfRecords}
+        generatedAt={generatedAt}
+      />,
+    ).toBlob()
+    const blobUrl = URL.createObjectURL(blob)
+    const openedWindow = window.open(blobUrl, '_blank', 'noopener,noreferrer')
+    if (!openedWindow) {
+      window.location.href = blobUrl
+    }
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000)
+  }, [pdfRecords])
 
   const tableTotalSize = table.getTotalSize()
   const effectiveTableWidth = Math.max(tableTotalSize, containerWidth)
@@ -313,6 +477,18 @@ export default function App() {
             columnResizeDirection={columnResizeDirection}
             setColumnResizeDirection={setColumnResizeDirection}
           />
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              void handleOpenPdfReport()
+            }}
+            disabled={pdfRecords.length === 0}
+            aria-label="Open PDF report in a new tab"
+          >
+            <FileText />
+            PDF Report
+          </Button>
         </div>
       </div>
 
