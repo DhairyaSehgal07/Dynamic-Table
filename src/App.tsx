@@ -38,9 +38,44 @@ const DEFAULT_COLUMN_MAX_SIZE = 360
 
 const pdfStyles = StyleSheet.create({
   page: {
-    padding: 24,
+    paddingTop: 56,
+    paddingBottom: 40,
+    paddingHorizontal: 24,
     fontSize: 10,
     fontFamily: 'Helvetica',
+  },
+  fixedHeader: {
+    position: 'absolute',
+    top: 18,
+    left: 24,
+    right: 24,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+    paddingBottom: 6,
+  },
+  fixedHeaderTitle: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#0f172a',
+  },
+  fixedHeaderMeta: {
+    fontSize: 9,
+    color: '#64748b',
+  },
+  fixedFooter: {
+    position: 'absolute',
+    bottom: 14,
+    left: 24,
+    right: 24,
+    borderTopWidth: 1,
+    borderTopColor: '#e2e8f0',
+    paddingTop: 6,
+    fontSize: 9,
+    color: '#64748b',
+    textAlign: 'right',
   },
   title: {
     fontSize: 16,
@@ -55,6 +90,7 @@ const pdfStyles = StyleSheet.create({
   table: {
     borderWidth: 1,
     borderColor: '#cbd5e1',
+    borderRadius: 4,
   },
   row: {
     flexDirection: 'row',
@@ -85,6 +121,19 @@ const pdfStyles = StyleSheet.create({
   rightBorderlessCell: {
     borderRightWidth: 0,
   },
+  section: {
+    marginBottom: 14,
+  },
+  sectionTitle: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#1e293b',
+    marginBottom: 6,
+  },
+  emptyState: {
+    fontSize: 10,
+    color: '#64748b',
+  },
 })
 
 const reportColumnConfig: Array<{
@@ -102,11 +151,11 @@ const reportColumnConfig: Array<{
 ]
 
 function TableReportDocument({
-  rows,
+  sections,
   generatedAt,
   columns,
 }: {
-  rows: FarmerTableRecord[]
+  sections: Array<{ title: string; rows: FarmerTableRecord[] }>
   generatedAt: string
   columns: Array<{
     key: keyof FarmerTableRecord
@@ -117,57 +166,79 @@ function TableReportDocument({
   const columnWidth = `${100 / Math.max(columns.length, 1)}%`
   return (
     <Document>
-      <Page size="A4" orientation="landscape" style={pdfStyles.page}>
+      <Page size="A4" orientation="landscape" style={pdfStyles.page} wrap>
+        <View style={pdfStyles.fixedHeader} fixed>
+          <Text style={pdfStyles.fixedHeaderTitle}>Inward Ledger Report</Text>
+          <Text style={pdfStyles.fixedHeaderMeta}>Generated: {generatedAt}</Text>
+        </View>
+        <Text
+          style={pdfStyles.fixedFooter}
+          fixed
+          render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`}
+        />
         <Text style={pdfStyles.title}>Inward Ledger Report</Text>
         <Text style={pdfStyles.subtitle}>
-          Generated: {generatedAt} | Total records: {rows.length}
+          Generated: {generatedAt} | Total records: {sections.reduce((sum, section) => sum + section.rows.length, 0)}
         </Text>
-        <View style={pdfStyles.table}>
-          <View style={[pdfStyles.row, pdfStyles.headerRow]}>
-            {columns.map((column, index) => {
-              const cellStyle = {
-                ...pdfStyles.cell,
-                width: columnWidth,
-                ...(index === columns.length - 1 ? pdfStyles.rightBorderlessCell : {}),
-              }
-              return (
-                <View
-                  key={column.key}
-                  style={cellStyle}
-                >
-                  <Text style={pdfStyles.headerCellText}>{column.label}</Text>
+        {sections.length === 0 ? (
+          <Text style={pdfStyles.emptyState}>No records found.</Text>
+        ) : (
+          sections.map((section, sectionIndex) => (
+            <View
+              key={`${section.title}-${sectionIndex}`}
+              style={pdfStyles.section}
+              break={sectionIndex > 0}
+            >
+              <Text style={pdfStyles.sectionTitle}>{section.title}</Text>
+              <View style={pdfStyles.table}>
+                <View style={[pdfStyles.row, pdfStyles.headerRow]}>
+                  {columns.map((column, index) => {
+                    const cellStyle = {
+                      ...pdfStyles.cell,
+                      width: columnWidth,
+                      ...(index === columns.length - 1 ? pdfStyles.rightBorderlessCell : {}),
+                    }
+                    return (
+                      <View
+                        key={`${section.title}-${column.key}-header`}
+                        style={cellStyle}
+                      >
+                        <Text style={pdfStyles.headerCellText}>{column.label}</Text>
+                      </View>
+                    )
+                  })}
                 </View>
-              )
-            })}
-          </View>
-          {rows.map((record) => (
-            <View key={record.gatePassNumber} style={pdfStyles.row}>
-              {columns.map((column, index) => {
-                const value = String(record[column.key]).replace('_', ' ')
-                const isNumeric = column.align === 'right'
-                const cellStyle = {
-                  ...pdfStyles.cell,
-                  width: columnWidth,
-                  ...(index === columns.length - 1 ? pdfStyles.rightBorderlessCell : {}),
-                }
-                const textStyle = {
-                  ...pdfStyles.cellText,
-                  ...(isNumeric ? pdfStyles.numericCellText : {}),
-                }
-                return (
-                  <View
-                    key={`${record.gatePassNumber}-${String(column.key)}`}
-                    style={cellStyle}
-                  >
-                    <Text style={textStyle}>
-                      {value}
-                    </Text>
+                {section.rows.map((record) => (
+                  <View key={`${section.title}-${record.gatePassNumber}`} style={pdfStyles.row}>
+                    {columns.map((column, index) => {
+                      const value = String(record[column.key]).replace('_', ' ')
+                      const isNumeric = column.align === 'right'
+                      const cellStyle = {
+                        ...pdfStyles.cell,
+                        width: columnWidth,
+                        ...(index === columns.length - 1 ? pdfStyles.rightBorderlessCell : {}),
+                      }
+                      const textStyle = {
+                        ...pdfStyles.cellText,
+                        ...(isNumeric ? pdfStyles.numericCellText : {}),
+                      }
+                      return (
+                        <View
+                          key={`${section.title}-${record.gatePassNumber}-${String(column.key)}`}
+                          style={cellStyle}
+                        >
+                          <Text style={textStyle}>
+                            {value}
+                          </Text>
+                        </View>
+                      )
+                    })}
                   </View>
-                )
-              })}
+                ))}
+              </View>
             </View>
-          ))}
-        </View>
+          ))
+        )}
       </Page>
     </Document>
   )
@@ -349,6 +420,7 @@ export default function App() {
 
   const visibleColumns = table.getVisibleLeafColumns()
   const rows = table.getRowModel().rows
+  const groupedRows = table.getGroupedRowModel().rows
   const visibleReportColumns = React.useMemo(() => {
     const configByKey = new Map(reportColumnConfig.map((column) => [column.key, column]))
     return visibleColumns
@@ -370,12 +442,65 @@ export default function App() {
     return leafRecords
   }, [rows])
 
+  const pdfSections = React.useMemo(() => {
+    if (grouping.length === 0) {
+      return [{ title: 'All Records', rows: pdfRecords }]
+    }
+
+    const labelByKey = new Map(reportColumnConfig.map((column) => [column.key, column.label]))
+    const sections: Array<{ title: string; rows: FarmerTableRecord[] }> = []
+
+    const appendLeafRows = (inputRows: Row<FarmerTableRecord>[]) => {
+      const leafRecords: FarmerTableRecord[] = []
+      const recurse = (rowsToCheck: Row<FarmerTableRecord>[]) => {
+        rowsToCheck.forEach((row) => {
+          if (row.subRows.length > 0) {
+            recurse(row.subRows as Row<FarmerTableRecord>[])
+            return
+          }
+          leafRecords.push(row.original)
+        })
+      }
+      recurse(inputRows)
+      return leafRecords
+    }
+
+    const buildSections = (
+      inputRows: Row<FarmerTableRecord>[],
+      depth: number,
+      path: string[],
+    ) => {
+      const groupingKey = grouping[depth] as keyof FarmerTableRecord | undefined
+      if (!groupingKey) return
+      const groupingLabel = labelByKey.get(groupingKey) ?? groupingKey
+
+      inputRows.forEach((row) => {
+        const groupValue = String(row.getValue(groupingKey)).replace('_', ' ')
+        const nextPath = [...path, `${groupingLabel}: ${groupValue}`]
+        const isLastGroupingLevel = depth === grouping.length - 1
+
+        if (isLastGroupingLevel) {
+          sections.push({
+            title: nextPath.join('  |  '),
+            rows: appendLeafRows([row]),
+          })
+          return
+        }
+
+        buildSections(row.subRows as Row<FarmerTableRecord>[], depth + 1, nextPath)
+      })
+    }
+
+    buildSections(groupedRows as Row<FarmerTableRecord>[], 0, [])
+    return sections
+  }, [grouping, groupedRows, pdfRecords])
+
   const handleOpenPdfReport = React.useCallback(async () => {
-    if (pdfRecords.length === 0 || visibleReportColumns.length === 0) return
+    if (pdfSections.length === 0 || visibleReportColumns.length === 0) return
     const generatedAt = new Date().toLocaleString()
     const blob = await pdf(
       <TableReportDocument
-        rows={pdfRecords}
+        sections={pdfSections}
         generatedAt={generatedAt}
         columns={visibleReportColumns}
       />,
@@ -386,7 +511,7 @@ export default function App() {
       window.location.href = blobUrl
     }
     window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000)
-  }, [pdfRecords, visibleReportColumns])
+  }, [pdfSections, visibleReportColumns])
 
   const tableTotalSize = table.getTotalSize()
   const effectiveTableWidth = Math.max(tableTotalSize, containerWidth)
@@ -496,7 +621,7 @@ export default function App() {
             onClick={() => {
               void handleOpenPdfReport()
             }}
-            disabled={pdfRecords.length === 0 || visibleReportColumns.length === 0}
+            disabled={pdfSections.length === 0 || visibleReportColumns.length === 0}
             aria-label="Open PDF report in a new tab"
           >
             <FileText />
