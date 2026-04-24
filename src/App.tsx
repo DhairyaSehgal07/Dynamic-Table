@@ -2,13 +2,16 @@ import * as React from 'react'
 import {
   type ColumnResizeDirection,
   type ColumnResizeMode,
+  type GroupingState,
   type Header,
   type Row,
   createColumnHelper,
   flexRender,
   getCoreRowModel,
+  getExpandedRowModel,
   getFacetedRowModel,
   getFacetedUniqueValues,
+  getGroupedRowModel,
   getSortedRowModel,
   useReactTable,
   type ColumnFiltersState,
@@ -113,11 +116,13 @@ export default function App() {
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
   const [columnOrder, setColumnOrder] = React.useState<string[]>(defaultColumnOrder)
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
+  const [grouping, setGrouping] = React.useState<GroupingState>([])
   const [filterLogic, setFilterLogic] = React.useState<FilterLogic>('and')
   const [columnResizeMode, setColumnResizeMode] = React.useState<ColumnResizeMode>('onChange')
   const [columnResizeDirection, setColumnResizeDirection] =
     React.useState<ColumnResizeDirection>('ltr')
   const tableContainerRef = React.useRef<HTMLDivElement>(null)
+  const [containerWidth, setContainerWidth] = React.useState(0)
 
   const filteredData = React.useMemo(() => {
     if (columnFilters.length === 0) return data
@@ -149,20 +154,44 @@ export default function App() {
       columnVisibility,
       columnOrder,
       columnFilters,
+      grouping,
     },
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
     onColumnOrderChange: setColumnOrder,
     onColumnFiltersChange: setColumnFilters,
+    onGroupingChange: setGrouping,
     columnResizeMode,
     columnResizeDirection,
     getCoreRowModel: getCoreRowModel(),
     getFacetedRowModel: getFacetedRowModel(),
     getFacetedUniqueValues: getFacetedUniqueValues(),
     getSortedRowModel: getSortedRowModel(),
+    getGroupedRowModel: getGroupedRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
   })
+  React.useLayoutEffect(() => {
+    const element = tableContainerRef.current
+    if (!element) return
+
+    const updateWidth = () => {
+      setContainerWidth(element.clientWidth)
+    }
+
+    updateWidth()
+    const observer = new ResizeObserver(updateWidth)
+    observer.observe(element)
+
+    return () => {
+      observer.disconnect()
+    }
+  }, [])
+
   const visibleColumns = table.getVisibleLeafColumns()
   const rows = table.getRowModel().rows
+
+  const tableTotalSize = table.getTotalSize()
+  const effectiveTableWidth = Math.max(tableTotalSize, containerWidth)
 
   const columnVirtualizer = useVirtualizer<HTMLDivElement, HTMLTableCellElement>({
     count: visibleColumns.length,
@@ -176,6 +205,7 @@ export default function App() {
   const virtualPaddingLeft = virtualColumns[0]?.start ?? 0
   const virtualPaddingRight =
     columnVirtualizer.getTotalSize() - (virtualColumns[virtualColumns.length - 1]?.end ?? 0)
+  const containerRightPadding = Math.max(0, effectiveTableWidth - tableTotalSize)
 
   const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLTableRowElement>({
     count: rows.length,
@@ -271,7 +301,7 @@ export default function App() {
             No records found.
           </div>
         ) : (
-          <table style={{ display: 'grid', width: table.getTotalSize() }} className="text-sm">
+          <table style={{ display: 'grid', width: effectiveTableWidth }} className="text-sm">
             <thead
               className="bg-slate-50 border-b-2 border-slate-200"
               style={{ display: 'grid', position: 'sticky', top: 0, zIndex: 10 }}
@@ -286,7 +316,14 @@ export default function App() {
                     if (!header) return null
                     return renderHeaderCell(header)
                   })}
-                  {virtualPaddingRight ? <th style={{ display: 'flex', width: virtualPaddingRight }} /> : null}
+                  {virtualPaddingRight + containerRightPadding ? (
+                    <th
+                      style={{
+                        display: 'flex',
+                        width: virtualPaddingRight + containerRightPadding,
+                      }}
+                    />
+                  ) : null}
                 </tr>
               ))}
             </thead>
@@ -318,17 +355,54 @@ export default function App() {
                     {virtualColumns.map((virtualColumn) => {
                       const cell = visibleCells[virtualColumn.index]
                       if (!cell) return null
+                      const isGroupedCell = cell.getIsGrouped()
+                      const isAggregatedCell = cell.getIsAggregated()
+                      const isPlaceholderCell = cell.getIsPlaceholder()
                       return (
                         <td
                           key={cell.id}
                           style={{ display: 'flex', width: cell.column.getSize() }}
-                          className="px-3 py-2 border-r last:border-r-0 align-middle text-slate-700"
+                          className={`px-3 py-2 border-r last:border-r-0 align-middle text-slate-700 ${
+                            isGroupedCell
+                              ? 'bg-emerald-50/70'
+                              : isAggregatedCell
+                                ? 'bg-amber-50/70'
+                                : isPlaceholderCell
+                                  ? 'bg-slate-50'
+                                  : ''
+                          }`}
                         >
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          {isGroupedCell ? (
+                            <button
+                              type="button"
+                              onClick={row.getToggleExpandedHandler()}
+                              className={`inline-flex items-center gap-1 text-left ${
+                                row.getCanExpand() ? 'cursor-pointer' : 'cursor-default'
+                              }`}
+                            >
+                              <span className="text-xs">{row.getIsExpanded() ? '▼' : '▶'}</span>
+                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                              <span className="text-xs text-slate-500">({row.subRows.length})</span>
+                            </button>
+                          ) : isAggregatedCell ? (
+                            flexRender(
+                              cell.column.columnDef.aggregatedCell ?? cell.column.columnDef.cell,
+                              cell.getContext(),
+                            )
+                          ) : isPlaceholderCell ? null : (
+                            flexRender(cell.column.columnDef.cell, cell.getContext())
+                          )}
                         </td>
                       )
                     })}
-                    {virtualPaddingRight ? <td style={{ display: 'flex', width: virtualPaddingRight }} /> : null}
+                    {virtualPaddingRight + containerRightPadding ? (
+                      <td
+                        style={{
+                          display: 'flex',
+                          width: virtualPaddingRight + containerRightPadding,
+                        }}
+                      />
+                    ) : null}
                   </tr>
                 )
               })}

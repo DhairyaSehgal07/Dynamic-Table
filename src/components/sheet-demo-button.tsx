@@ -11,6 +11,8 @@ import {
   TouchSensor,
   closestCenter,
   type DragEndEvent,
+  useDraggable,
+  useDroppable,
   useSensor,
   useSensors,
 } from '@dnd-kit/core'
@@ -44,7 +46,6 @@ import {
   Calendar as CalendarIcon,
   GripVertical,
   Search,
-  PlusCircle,
   ChevronDown,
 } from 'lucide-react'
 import type { FarmerTableRecord } from '@/data/farmer-table-data'
@@ -83,6 +84,18 @@ type SortableColumnRowProps = {
   label: string
   checked: boolean
   onCheckedChange: (checked: boolean) => void
+}
+
+type SortableGroupingRowProps = {
+  columnId: string
+  label: string
+  groupedIndex: number
+  onRemove: () => void
+}
+
+type GroupingDropZoneProps = {
+  index: number
+  isActive: boolean
 }
 
 function SortableColumnRow({
@@ -130,6 +143,60 @@ function SortableColumnRow({
   )
 }
 
+function SortableGroupingRow({
+  columnId,
+  label,
+  groupedIndex,
+  onRemove,
+}: SortableGroupingRowProps) {
+  const { attributes, listeners, setNodeRef, transform } = useDraggable({
+    id: `grouping-item:${columnId}`,
+  })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center justify-between rounded border border-slate-200 bg-white p-2"
+    >
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          aria-label={`Reorder ${label}`}
+          className="cursor-grab text-slate-400 hover:text-slate-600 active:cursor-grabbing"
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical className="h-4 w-4" />
+        </button>
+        <span className="text-xs font-semibold text-blue-600">#{groupedIndex + 1}</span>
+        <span className="text-sm font-medium text-slate-700">{label}</span>
+      </div>
+      <Button type="button" variant="ghost" className="h-7 px-2 text-xs" onClick={onRemove}>
+        Remove
+      </Button>
+    </div>
+  )
+}
+
+function GroupingDropZone({ index, isActive }: GroupingDropZoneProps) {
+  const { setNodeRef } = useDroppable({
+    id: `grouping-slot:${index}`,
+  })
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`h-2 rounded ${isActive ? 'bg-blue-300/80' : 'bg-transparent'}`}
+      aria-hidden
+    />
+  )
+}
+
 export function SheetDemoButton({
   table,
   defaultColumnOrder,
@@ -171,6 +238,7 @@ export function SheetDemoButton({
     bags: [],
     netWeight: [],
   })
+  const [draftGrouping, setDraftGrouping] = React.useState<string[]>([])
   const [draftFilterLogic, setDraftFilterLogic] = React.useState<'and' | 'or'>(filterLogic)
   const sensors = useSensors(
     useSensor(MouseSensor),
@@ -241,6 +309,7 @@ export function SheetDemoButton({
       }
     })
     setDraftValueFilters(nextValueFilters)
+    setDraftGrouping(table.getState().grouping)
   }
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -309,6 +378,7 @@ export function SheetDemoButton({
     setDraftColumnOrder(resetOrder)
     setDraftStatusFilters(['GRADED', 'NOT_GRADED'])
     setDraftValueFilters(resetValueFilters)
+    setDraftGrouping([])
     setDraftFilterLogic('and')
     setSearchQueries({
       gatePassNumber: '',
@@ -330,6 +400,7 @@ export function SheetDemoButton({
     table.setColumnVisibility({})
     table.setColumnOrder(resetOrder)
     table.resetColumnFilters()
+    table.setGrouping([])
     setFilterLogic('and')
     setColumnResizeMode('onChange')
     setColumnResizeDirection('ltr')
@@ -354,6 +425,7 @@ export function SheetDemoButton({
         column?.setFilterValue(selectedValues)
       }
     })
+    table.setGrouping(draftGrouping)
     setFilterLogic(draftFilterLogic)
     setIsOpen(false)
   }
@@ -436,6 +508,91 @@ export function SheetDemoButton({
     bags: 'Bags',
     netWeight: 'Net Weight (kg)',
     status: 'Status',
+  }
+
+  const groupingOptions = table
+    .getAllLeafColumns()
+    .filter((column) => column.getCanGroup())
+    .map((column) => ({
+      id: column.id,
+      label: columnLabels[column.id] ?? column.id,
+      isGrouped: draftGrouping.includes(column.id),
+    }))
+
+  const toggleDraftGrouping = (columnId: string) => {
+    setDraftGrouping((current) =>
+      current.includes(columnId)
+        ? current.filter((id) => id !== columnId)
+        : [...current, columnId],
+    )
+  }
+
+  const [activeGroupingDropIndex, setActiveGroupingDropIndex] = React.useState<number | null>(null)
+
+  const parseGroupingColumnId = (id: string) => id.replace('grouping-item:', '')
+  const parseGroupingSlotIndex = (id: string) => Number(id.replace('grouping-slot:', ''))
+
+  const handleGroupingDragMove = (event: { over: { id: string | number } | null }) => {
+    if (!event.over) {
+      setActiveGroupingDropIndex(null)
+      return
+    }
+
+    const overId = String(event.over.id)
+    if (overId.startsWith('grouping-slot:')) {
+      const index = parseGroupingSlotIndex(overId)
+      if (!Number.isNaN(index)) {
+        setActiveGroupingDropIndex(index)
+        return
+      }
+    }
+
+    if (overId.startsWith('grouping-item:')) {
+      const columnId = parseGroupingColumnId(overId)
+      const overIndex = draftGrouping.findIndex((id) => id === columnId)
+      setActiveGroupingDropIndex(overIndex >= 0 ? overIndex : null)
+      return
+    }
+
+    setActiveGroupingDropIndex(null)
+  }
+
+  const handleGroupingDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    setActiveGroupingDropIndex(null)
+    if (!over) return
+
+    const activeId = String(active.id)
+    if (!activeId.startsWith('grouping-item:')) return
+    const activeColumnId = parseGroupingColumnId(activeId)
+
+    let targetIndex: number | null = null
+    const overId = String(over.id)
+    if (overId.startsWith('grouping-slot:')) {
+      const parsedIndex = parseGroupingSlotIndex(overId)
+      if (!Number.isNaN(parsedIndex)) {
+        targetIndex = parsedIndex
+      }
+    } else if (overId.startsWith('grouping-item:')) {
+      const overColumnId = parseGroupingColumnId(overId)
+      const overIndex = draftGrouping.findIndex((id) => id === overColumnId)
+      if (overIndex >= 0) {
+        targetIndex = overIndex
+      }
+    }
+
+    if (targetIndex === null) return
+
+    setDraftGrouping((current) => {
+      const currentIndex = current.indexOf(activeColumnId)
+      if (currentIndex < 0) return current
+
+      const next = [...current]
+      next.splice(currentIndex, 1)
+      const clampedTargetIndex = Math.max(0, Math.min(targetIndex as number, next.length))
+      next.splice(clampedTargetIndex, 0, activeColumnId)
+      return next
+    })
   }
 
   return (
@@ -685,19 +842,91 @@ export function SheetDemoButton({
             {/* TAB 3: GROUPING */}
             <TabsContent value="grouping" className="m-0 space-y-4 focus-visible:ring-0">
               <Label className="text-sm font-bold text-slate-700 uppercase tracking-wider">Row Grouping</Label>
-              <div className="p-6 border border-slate-200 rounded-md bg-white text-center space-y-4 shadow-sm">
-                <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center mx-auto">
-                  <Rows3 className="h-6 w-6 text-blue-600" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-semibold text-slate-800">No Groups Applied</h4>
-                  <p className="text-xs text-slate-500 mt-1 max-w-[250px] mx-auto">
-                    Group rows together by specific columns like Farmer Name or Date to create summarized views.
+              <div className="rounded-md border border-slate-200 bg-white shadow-sm">
+                <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                  <p className="text-sm text-slate-600">
+                    Add columns, then drag to set grouping priority.
                   </p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="h-auto p-0 text-xs text-blue-600"
+                    onClick={() => setDraftGrouping([])}
+                  >
+                    Clear
+                  </Button>
                 </div>
-                <Button variant="outline" className="bg-white gap-2">
-                  <PlusCircle className="h-4 w-4" /> Add Grouping
-                </Button>
+                <div className="space-y-3 p-3">
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Grouped Columns
+                    </p>
+                    {draftGrouping.length === 0 ? (
+                      <div className="rounded border border-dashed border-slate-200 px-3 py-4 text-xs text-slate-500">
+                        No groups selected.
+                      </div>
+                    ) : (
+                      <DndContext
+                        modifiers={[restrictToVerticalAxis]}
+                        onDragMove={handleGroupingDragMove}
+                        onDragEnd={handleGroupingDragEnd}
+                        sensors={sensors}
+                      >
+                        <div className="space-y-1">
+                          {draftGrouping.map((columnId, index) => {
+                            const option = groupingOptions.find((item) => item.id === columnId)
+                            if (!option) return null
+
+                            return (
+                              <React.Fragment key={columnId}>
+                                <GroupingDropZone
+                                  index={index}
+                                  isActive={activeGroupingDropIndex === index}
+                                />
+                                <SortableGroupingRow
+                                  columnId={columnId}
+                                  label={option.label}
+                                  groupedIndex={index}
+                                  onRemove={() => toggleDraftGrouping(columnId)}
+                                />
+                              </React.Fragment>
+                            )
+                          })}
+                          <GroupingDropZone
+                            index={draftGrouping.length}
+                            isActive={activeGroupingDropIndex === draftGrouping.length}
+                          />
+                        </div>
+                      </DndContext>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Available Columns
+                    </p>
+                    <div className="space-y-1">
+                      {groupingOptions
+                        .filter((option) => !option.isGrouped)
+                        .map((option) => (
+                          <div
+                            key={option.id}
+                            className="flex items-center justify-between rounded border border-slate-200 bg-slate-50/60 px-2 py-2"
+                          >
+                            <span className="text-sm text-slate-700">{option.label}</span>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-7 px-2 text-xs"
+                              onClick={() => toggleDraftGrouping(option.id)}
+                            >
+                              Add
+                            </Button>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                </div>
               </div>
             </TabsContent>
 
