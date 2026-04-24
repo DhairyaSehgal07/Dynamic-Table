@@ -2,6 +2,8 @@ import * as React from 'react'
 import {
   type ColumnResizeDirection,
   type ColumnResizeMode,
+  type Header,
+  type Row,
   createColumnHelper,
   flexRender,
   getCoreRowModel,
@@ -12,14 +14,7 @@ import {
   type SortingState,
   type VisibilityState,
 } from '@tanstack/react-table'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Search, ArrowUpDown, ArrowDown, ArrowUp } from 'lucide-react'
@@ -118,6 +113,7 @@ export default function App() {
   const [columnResizeMode, setColumnResizeMode] = React.useState<ColumnResizeMode>('onChange')
   const [columnResizeDirection, setColumnResizeDirection] =
     React.useState<ColumnResizeDirection>('ltr')
+  const tableContainerRef = React.useRef<HTMLDivElement>(null)
 
   const table = useReactTable({
     data,
@@ -138,6 +134,80 @@ export default function App() {
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
   })
+  const visibleColumns = table.getVisibleLeafColumns()
+  const rows = table.getRowModel().rows
+
+  const columnVirtualizer = useVirtualizer<HTMLDivElement, HTMLTableCellElement>({
+    count: visibleColumns.length,
+    estimateSize: (index) => visibleColumns[index]?.getSize() ?? 160,
+    getScrollElement: () => tableContainerRef.current,
+    horizontal: true,
+    overscan: 3,
+  })
+
+  const virtualColumns = columnVirtualizer.getVirtualItems()
+  const virtualPaddingLeft = virtualColumns[0]?.start ?? 0
+  const virtualPaddingRight =
+    columnVirtualizer.getTotalSize() - (virtualColumns[virtualColumns.length - 1]?.end ?? 0)
+
+  const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLTableRowElement>({
+    count: rows.length,
+    estimateSize: () => 40,
+    getScrollElement: () => tableContainerRef.current,
+    measureElement:
+      typeof window !== 'undefined' && navigator.userAgent.indexOf('Firefox') === -1
+        ? (element) => element?.getBoundingClientRect().height
+        : undefined,
+    overscan: 8,
+  })
+
+  const virtualRows = rowVirtualizer.getVirtualItems()
+
+  const renderHeaderCell = (header: Header<FarmerTableRecord, unknown>) => {
+    const isRightAligned = header.id === 'bags' || header.id === 'netWeight'
+    return (
+      <th
+        key={header.id}
+        style={{ display: 'flex', width: header.getSize(), position: 'relative' }}
+        className="h-9 px-3 py-2 text-xs font-bold text-slate-600 uppercase tracking-wider border-r last:border-r-0 align-middle select-none hover:bg-slate-200/50 transition-colors"
+      >
+        {header.isPlaceholder ? null : (
+          <div
+            className={`flex w-full items-center group cursor-pointer ${isRightAligned ? 'justify-end' : 'justify-between'}`}
+            onClick={header.column.getToggleSortingHandler()}
+          >
+            {flexRender(header.column.columnDef.header, header.getContext())}
+            <span className={`${isRightAligned ? 'ml-2' : ''}`}>
+              {{
+                asc: <ArrowUp className="ml-1 h-3.5 w-3.5 text-slate-800" />,
+                desc: <ArrowDown className="ml-1 h-3.5 w-3.5 text-slate-800" />,
+              }[header.column.getIsSorted() as string] ?? (
+                <ArrowUpDown className="ml-1 h-3.5 w-3.5 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+              )}
+            </span>
+          </div>
+        )}
+        <div
+          onDoubleClick={() => header.column.resetSize()}
+          onMouseDown={header.getResizeHandler()}
+          onTouchStart={header.getResizeHandler()}
+          onClick={(event) => event.stopPropagation()}
+          className={`resizer ${table.options.columnResizeDirection} ${
+            header.column.getIsResizing() ? 'isResizing' : ''
+          }`}
+          style={{
+            transform:
+              columnResizeMode === 'onEnd' && header.column.getIsResizing()
+                ? `translateX(${
+                    (table.options.columnResizeDirection === 'rtl' ? -1 : 1) *
+                    (table.getState().columnSizingInfo.deltaOffset ?? 0)
+                  }px)`
+                : '',
+          }}
+        />
+      </th>
+    )
+  }
 
   return (
     <div className="mx-auto max-w-6xl p-6 space-y-4 font-sans">
@@ -162,98 +232,79 @@ export default function App() {
 
       {/* The Grid Container */}
       <div
-        className="overflow-x-auto rounded-b-lg border shadow-sm bg-white"
-        style={{ direction: table.options.columnResizeDirection }}
+        ref={tableContainerRef}
+        className="overflow-auto rounded-b-lg border shadow-sm bg-white"
+        style={{ direction: table.options.columnResizeDirection, height: '560px', position: 'relative' }}
       >
-        <Table className="text-sm" style={{ width: table.getTotalSize() }}>
-          <TableHeader className="bg-slate-50 border-b-2 border-slate-200">
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id} className="hover:bg-transparent">
-                {headerGroup.headers.map((header) => {
-                  // Determine alignment based on column ID to place the sort icon correctly
-                  const isRightAligned = header.id === 'bags' || header.id === 'netWeight'
-
-                  return (
-                    <TableHead
-                      key={header.id}
-                      style={{ width: header.getSize() }}
-                      className="relative h-9 px-3 py-2 text-xs font-bold text-slate-600 uppercase tracking-wider border-r last:border-r-0 align-middle select-none hover:bg-slate-200/50 transition-colors"
-                    >
-                      {header.isPlaceholder ? null : (
-                        // 3. Clickable header area for sorting
-                        <div
-                          className={`flex items-center group cursor-pointer ${isRightAligned ? 'justify-end' : 'justify-between'}`}
-                          onClick={header.column.getToggleSortingHandler()}
+        {rows.length === 0 ? (
+          <div className="h-24 flex items-center justify-center text-slate-500">
+            No records found.
+          </div>
+        ) : (
+          <table style={{ display: 'grid', width: table.getTotalSize() }} className="text-sm">
+            <thead
+              className="bg-slate-50 border-b-2 border-slate-200"
+              style={{ display: 'grid', position: 'sticky', top: 0, zIndex: 10 }}
+            >
+              {table.getHeaderGroups().map((headerGroup) => (
+                <tr key={headerGroup.id} style={{ display: 'flex', width: '100%' }}>
+                  {virtualPaddingLeft ? <th style={{ display: 'flex', width: virtualPaddingLeft }} /> : null}
+                  {virtualColumns.map((virtualColumn) => {
+                    const header = headerGroup.headers[virtualColumn.index] as
+                      | Header<FarmerTableRecord, unknown>
+                      | undefined
+                    if (!header) return null
+                    return renderHeaderCell(header)
+                  })}
+                  {virtualPaddingRight ? <th style={{ display: 'flex', width: virtualPaddingRight }} /> : null}
+                </tr>
+              ))}
+            </thead>
+            <tbody
+              style={{
+                display: 'grid',
+                height: `${rowVirtualizer.getTotalSize()}px`,
+                position: 'relative',
+              }}
+            >
+              {virtualRows.map((virtualRow) => {
+                const row = rows[virtualRow.index] as Row<FarmerTableRecord>
+                const visibleCells = row.getVisibleCells()
+                return (
+                  <tr
+                    key={row.id}
+                    data-index={virtualRow.index}
+                    ref={(node) => rowVirtualizer.measureElement(node)}
+                    className="border-b transition-colors hover:bg-blue-50/50"
+                    style={{
+                      display: 'flex',
+                      position: 'absolute',
+                      transform: `translateY(${virtualRow.start}px)`,
+                      width: '100%',
+                      backgroundColor: virtualRow.index % 2 === 0 ? 'white' : 'rgb(248 250 252 / 0.3)',
+                    }}
+                  >
+                    {virtualPaddingLeft ? <td style={{ display: 'flex', width: virtualPaddingLeft }} /> : null}
+                    {virtualColumns.map((virtualColumn) => {
+                      const cell = visibleCells[virtualColumn.index]
+                      if (!cell) return null
+                      return (
+                        <td
+                          key={cell.id}
+                          style={{ display: 'flex', width: cell.column.getSize() }}
+                          className="px-3 py-2 border-r last:border-r-0 align-middle text-slate-700"
                         >
-                          {flexRender(
-                            header.column.columnDef.header,
-                            header.getContext(),
-                          )}
-
-                          {/* Sorting Icon Logic */}
-                          <span className={`${isRightAligned ? 'ml-2' : ''}`}>
-                            {{
-                              asc: <ArrowUp className="ml-1 h-3.5 w-3.5 text-slate-800" />,
-                              desc: <ArrowDown className="ml-1 h-3.5 w-3.5 text-slate-800" />,
-                            }[header.column.getIsSorted() as string] ?? (
-                              <ArrowUpDown className="ml-1 h-3.5 w-3.5 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
-                            )}
-                          </span>
-                        </div>
-                      )}
-                      <div
-                        onDoubleClick={() => header.column.resetSize()}
-                        onMouseDown={header.getResizeHandler()}
-                        onTouchStart={header.getResizeHandler()}
-                        onClick={(event) => event.stopPropagation()}
-                        className={`resizer ${table.options.columnResizeDirection} ${
-                          header.column.getIsResizing() ? 'isResizing' : ''
-                        }`}
-                        style={{
-                          transform:
-                            columnResizeMode === 'onEnd' && header.column.getIsResizing()
-                              ? `translateX(${
-                                  (table.options.columnResizeDirection === 'rtl' ? -1 : 1) *
-                                  (table.getState().columnSizingInfo.deltaOffset ?? 0)
-                                }px)`
-                              : '',
-                        }}
-                      />
-                    </TableHead>
-                  )
-                })}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {table.getRowModel().rows.length ? (
-              table.getRowModel().rows.map((row, index) => (
-                <TableRow
-                  key={row.id}
-                  className={`border-b transition-colors hover:bg-blue-50/50 ${
-                    index % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'
-                  }`}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell
-                      key={cell.id}
-                      style={{ width: cell.column.getSize() }}
-                      className="px-3 py-2 border-r last:border-r-0 align-middle text-slate-700"
-                    >
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell colSpan={table.getVisibleLeafColumns().length} className="h-24 text-center text-slate-500">
-                  No records found.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </td>
+                      )
+                    })}
+                    {virtualPaddingRight ? <td style={{ display: 'flex', width: virtualPaddingRight }} /> : null}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <h1> Feature given by Lokesh bhai: </h1>
@@ -265,7 +316,7 @@ export default function App() {
 
       {/* Fake Footer/Pagination */}
       <div className="flex items-center justify-between text-sm text-slate-500 px-1">
-        <span>Showing {table.getRowModel().rows.length} of {data.length} entries</span>
+        <span>Showing {rows.length} of {data.length} entries</span>
       </div>
 
     </div>
