@@ -1,6 +1,24 @@
 import * as React from 'react'
 import type { Table as TanstackTable } from '@tanstack/react-table'
 import {
+  DndContext,
+  KeyboardSensor,
+  MouseSensor,
+  TouchSensor,
+  closestCenter,
+  type DragEndEvent,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core'
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers'
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -32,21 +50,89 @@ type SheetDemoButtonProps = {
   table: TanstackTable<FarmerTableRecord>
 }
 
+type SortableColumnRowProps = {
+  columnId: string
+  label: string
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+}
+
+function SortableColumnRow({
+  columnId,
+  label,
+  checked,
+  onCheckedChange,
+}: SortableColumnRowProps) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
+    id: columnId,
+  })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center justify-between p-3 hover:bg-slate-50 transition-colors group"
+    >
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          aria-label={`Reorder ${label}`}
+          className="cursor-grab text-slate-300 group-hover:text-slate-500 active:cursor-grabbing"
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical className="h-4 w-4" />
+        </button>
+        <Label htmlFor={`col-${columnId}`} className="cursor-pointer text-sm font-medium text-slate-700">
+          {label}
+        </Label>
+      </div>
+      <Switch
+        id={`col-${columnId}`}
+        checked={checked}
+        onCheckedChange={onCheckedChange}
+        className="data-[state=checked]:bg-blue-600"
+      />
+    </div>
+  )
+}
+
 export function SheetDemoButton({ table }: SheetDemoButtonProps) {
   const [isOpen, setIsOpen] = React.useState(false)
   const [draftColumnVisibility, setDraftColumnVisibility] = React.useState<Record<string, boolean>>({})
+  const [draftColumnOrder, setDraftColumnOrder] = React.useState<string[]>([])
+  const sensors = useSensors(
+    useSensor(MouseSensor),
+    useSensor(TouchSensor),
+    useSensor(KeyboardSensor),
+  )
 
   const hidableColumns = table
     .getAllLeafColumns()
     .filter((column) => column.getCanHide())
+  const hidableColumnIds = hidableColumns.map((column) => column.id)
+  const columnMap = new Map(hidableColumns.map((column) => [column.id, column]))
+  const orderedColumns = draftColumnOrder
+    .map((columnId) => columnMap.get(columnId))
+    .filter((column) => column !== undefined)
 
-  const syncDraftFromTable = React.useCallback(() => {
+  const syncDraftFromTable = () => {
     const nextDraft: Record<string, boolean> = {}
     hidableColumns.forEach((column) => {
       nextDraft[column.id] = column.getIsVisible()
     })
+    const activeOrder = table.getState().columnOrder
+    const validOrder = activeOrder.filter((id) => hidableColumnIds.includes(id))
+    const missing = hidableColumnIds.filter((id) => !validOrder.includes(id))
+
     setDraftColumnVisibility(nextDraft)
-  }, [hidableColumns])
+    setDraftColumnOrder([...validOrder, ...missing])
+  }
 
   const handleOpenChange = (nextOpen: boolean) => {
     setIsOpen(nextOpen)
@@ -84,7 +170,20 @@ export function SheetDemoButton({ table }: SheetDemoButtonProps) {
 
   const handleApplyView = () => {
     table.setColumnVisibility(draftColumnVisibility)
+    table.setColumnOrder(draftColumnOrder)
     setIsOpen(false)
+  }
+
+  const handleColumnDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+
+    setDraftColumnOrder((current) => {
+      const oldIndex = current.indexOf(active.id as string)
+      const newIndex = current.indexOf(over.id as string)
+      if (oldIndex < 0 || newIndex < 0) return current
+      return arrayMove(current, oldIndex, newIndex)
+    })
   }
 
   const columnLabels: Record<string, string> = {
@@ -234,22 +333,29 @@ export function SheetDemoButton({ table }: SheetDemoButtonProps) {
                 </Button>
               </div>
               <div className="bg-white border border-slate-200 rounded-md shadow-sm divide-y divide-slate-100">
-                {hidableColumns.map((column) => (
-                  <div key={column.id} className="flex items-center justify-between p-3 hover:bg-slate-50 transition-colors group">
-                    <div className="flex items-center gap-3">
-                      <GripVertical className="h-4 w-4 text-slate-300 cursor-grab group-hover:text-slate-500" />
-                      <Label htmlFor={`col-${column.id}`} className="cursor-pointer text-sm font-medium text-slate-700">
-                        {columnLabels[column.id] ?? column.id}
-                      </Label>
-                    </div>
-                    <Switch
-                      id={`col-${column.id}`}
-                      checked={draftColumnVisibility[column.id] ?? true}
-                      onCheckedChange={(checked) => handleDraftVisibilityChange(column.id, !!checked)}
-                      className="data-[state=checked]:bg-blue-600"
-                    />
-                  </div>
-                ))}
+                <DndContext
+                  collisionDetection={closestCenter}
+                  modifiers={[restrictToVerticalAxis]}
+                  onDragEnd={handleColumnDragEnd}
+                  sensors={sensors}
+                >
+                  <SortableContext
+                    items={draftColumnOrder}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    {orderedColumns.map((column) => (
+                      <SortableColumnRow
+                        key={column.id}
+                        columnId={column.id}
+                        label={columnLabels[column.id] ?? column.id}
+                        checked={draftColumnVisibility[column.id] ?? true}
+                        onCheckedChange={(checked) =>
+                          handleDraftVisibilityChange(column.id, !!checked)
+                        }
+                      />
+                    ))}
+                  </SortableContext>
+                </DndContext>
               </div>
             </TabsContent>
 

@@ -73,10 +73,21 @@ const columns = [
   }),
 ]
 
+const defaultColumnOrder = [
+  'gatePassNumber',
+  'date',
+  'farmer',
+  'variety',
+  'bags',
+  'netWeight',
+  'status',
+]
+
 export default function App() {
   const [data] = React.useState(() => [...farmerTableData])
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
+  const [columnOrder, setColumnOrder] = React.useState<string[]>(defaultColumnOrder)
 
   const table = useReactTable({
     data,
@@ -84,9 +95,11 @@ export default function App() {
     state: {
       sorting,
       columnVisibility,
+      columnOrder,
     },
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
+    onColumnOrderChange: setColumnOrder,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
   })
