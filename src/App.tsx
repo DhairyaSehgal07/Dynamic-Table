@@ -87,28 +87,34 @@ const pdfStyles = StyleSheet.create({
   },
 })
 
-const reportColumns: Array<{
+const reportColumnConfig: Array<{
   key: keyof FarmerTableRecord
   label: string
-  width: string
   align?: 'left' | 'right'
 }> = [
-  { key: 'gatePassNumber', label: 'Gate Pass', width: '16%' },
-  { key: 'date', label: 'Date', width: '14%' },
-  { key: 'farmer', label: 'Farmer', width: '22%' },
-  { key: 'variety', label: 'Variety', width: '16%' },
-  { key: 'bags', label: 'Bags', width: '10%', align: 'right' },
-  { key: 'netWeight', label: 'Net Wt (kg)', width: '12%', align: 'right' },
-  { key: 'status', label: 'Status', width: '10%' },
+  { key: 'gatePassNumber', label: 'Gate Pass' },
+  { key: 'date', label: 'Date' },
+  { key: 'farmer', label: 'Farmer' },
+  { key: 'variety', label: 'Variety' },
+  { key: 'bags', label: 'Bags', align: 'right' },
+  { key: 'netWeight', label: 'Net Wt (kg)', align: 'right' },
+  { key: 'status', label: 'Status' },
 ]
 
 function TableReportDocument({
   rows,
   generatedAt,
+  columns,
 }: {
   rows: FarmerTableRecord[]
   generatedAt: string
+  columns: Array<{
+    key: keyof FarmerTableRecord
+    label: string
+    align?: 'left' | 'right'
+  }>
 }) {
+  const columnWidth = `${100 / Math.max(columns.length, 1)}%`
   return (
     <Document>
       <Page size="A4" orientation="landscape" style={pdfStyles.page}>
@@ -118,11 +124,11 @@ function TableReportDocument({
         </Text>
         <View style={pdfStyles.table}>
           <View style={[pdfStyles.row, pdfStyles.headerRow]}>
-            {reportColumns.map((column, index) => {
+            {columns.map((column, index) => {
               const cellStyle = {
                 ...pdfStyles.cell,
-                width: column.width,
-                ...(index === reportColumns.length - 1 ? pdfStyles.rightBorderlessCell : {}),
+                width: columnWidth,
+                ...(index === columns.length - 1 ? pdfStyles.rightBorderlessCell : {}),
               }
               return (
                 <View
@@ -136,13 +142,13 @@ function TableReportDocument({
           </View>
           {rows.map((record) => (
             <View key={record.gatePassNumber} style={pdfStyles.row}>
-              {reportColumns.map((column, index) => {
+              {columns.map((column, index) => {
                 const value = String(record[column.key]).replace('_', ' ')
                 const isNumeric = column.align === 'right'
                 const cellStyle = {
                   ...pdfStyles.cell,
-                  width: column.width,
-                  ...(index === reportColumns.length - 1 ? pdfStyles.rightBorderlessCell : {}),
+                  width: columnWidth,
+                  ...(index === columns.length - 1 ? pdfStyles.rightBorderlessCell : {}),
                 }
                 const textStyle = {
                   ...pdfStyles.cellText,
@@ -343,6 +349,12 @@ export default function App() {
 
   const visibleColumns = table.getVisibleLeafColumns()
   const rows = table.getRowModel().rows
+  const visibleReportColumns = React.useMemo(() => {
+    const configByKey = new Map(reportColumnConfig.map((column) => [column.key, column]))
+    return visibleColumns
+      .map((column) => configByKey.get(column.id as keyof FarmerTableRecord))
+      .filter((column): column is (typeof reportColumnConfig)[number] => Boolean(column))
+  }, [visibleColumns])
   const pdfRecords = React.useMemo(() => {
     const leafRecords: FarmerTableRecord[] = []
     const appendLeafRows = (inputRows: Row<FarmerTableRecord>[]) => {
@@ -359,12 +371,13 @@ export default function App() {
   }, [rows])
 
   const handleOpenPdfReport = React.useCallback(async () => {
-    if (pdfRecords.length === 0) return
+    if (pdfRecords.length === 0 || visibleReportColumns.length === 0) return
     const generatedAt = new Date().toLocaleString()
     const blob = await pdf(
       <TableReportDocument
         rows={pdfRecords}
         generatedAt={generatedAt}
+        columns={visibleReportColumns}
       />,
     ).toBlob()
     const blobUrl = URL.createObjectURL(blob)
@@ -373,7 +386,7 @@ export default function App() {
       window.location.href = blobUrl
     }
     window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000)
-  }, [pdfRecords])
+  }, [pdfRecords, visibleReportColumns])
 
   const tableTotalSize = table.getTotalSize()
   const effectiveTableWidth = Math.max(tableTotalSize, containerWidth)
@@ -483,7 +496,7 @@ export default function App() {
             onClick={() => {
               void handleOpenPdfReport()
             }}
-            disabled={pdfRecords.length === 0}
+            disabled={pdfRecords.length === 0 || visibleReportColumns.length === 0}
             aria-label="Open PDF report in a new tab"
           >
             <FileText />
