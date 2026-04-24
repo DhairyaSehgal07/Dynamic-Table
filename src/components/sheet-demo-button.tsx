@@ -50,6 +50,8 @@ type SheetDemoButtonProps = {
   table: TanstackTable<FarmerTableRecord>
 }
 
+type StatusFilterValue = 'GRADED' | 'NOT_GRADED'
+
 type SortableColumnRowProps = {
   columnId: string
   label: string
@@ -106,6 +108,10 @@ export function SheetDemoButton({ table }: SheetDemoButtonProps) {
   const [isOpen, setIsOpen] = React.useState(false)
   const [draftColumnVisibility, setDraftColumnVisibility] = React.useState<Record<string, boolean>>({})
   const [draftColumnOrder, setDraftColumnOrder] = React.useState<string[]>([])
+  const [draftStatusFilters, setDraftStatusFilters] = React.useState<StatusFilterValue[]>([
+    'GRADED',
+    'NOT_GRADED',
+  ])
   const sensors = useSensors(
     useSensor(MouseSensor),
     useSensor(TouchSensor),
@@ -132,6 +138,13 @@ export function SheetDemoButton({ table }: SheetDemoButtonProps) {
 
     setDraftColumnVisibility(nextDraft)
     setDraftColumnOrder([...validOrder, ...missing])
+
+    const rawStatusFilter = table.getColumn('status')?.getFilterValue()
+    if (Array.isArray(rawStatusFilter)) {
+      setDraftStatusFilters(rawStatusFilter as StatusFilterValue[])
+    } else {
+      setDraftStatusFilters(['GRADED', 'NOT_GRADED'])
+    }
   }
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -171,7 +184,23 @@ export function SheetDemoButton({ table }: SheetDemoButtonProps) {
   const handleApplyView = () => {
     table.setColumnVisibility(draftColumnVisibility)
     table.setColumnOrder(draftColumnOrder)
+    const statusColumn = table.getColumn('status')
+    if (draftStatusFilters.length === 2) {
+      statusColumn?.setFilterValue(undefined)
+    } else {
+      statusColumn?.setFilterValue(draftStatusFilters)
+    }
     setIsOpen(false)
+  }
+
+  const toggleStatusDraft = (status: StatusFilterValue, checked: boolean) => {
+    setDraftStatusFilters((current) => {
+      if (checked) {
+        if (current.includes(status)) return current
+        return [...current, status]
+      }
+      return current.filter((value) => value !== status)
+    })
   }
 
   const handleColumnDragEnd = (event: DragEndEvent) => {
@@ -271,7 +300,12 @@ export function SheetDemoButton({ table }: SheetDemoButtonProps) {
                 <Label className="text-sm font-bold text-slate-700 uppercase tracking-wider">QC Status</Label>
                 <div className="grid grid-cols-2 gap-3">
                   <label className="flex items-start space-x-3 p-3 bg-white border border-slate-200 rounded-md cursor-pointer hover:border-blue-400 transition-colors shadow-sm">
-                    <Checkbox id="status-graded" defaultChecked className="mt-0.5" />
+                    <Checkbox
+                      id="status-graded"
+                      checked={draftStatusFilters.includes('GRADED')}
+                      onCheckedChange={(checked) => toggleStatusDraft('GRADED', !!checked)}
+                      className="mt-0.5"
+                    />
                     <div className="flex flex-col">
                       <span className="text-sm font-medium text-slate-700 flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Graded
@@ -279,10 +313,15 @@ export function SheetDemoButton({ table }: SheetDemoButtonProps) {
                     </div>
                   </label>
                   <label className="flex items-start space-x-3 p-3 bg-white border border-slate-200 rounded-md cursor-pointer hover:border-blue-400 transition-colors shadow-sm">
-                    <Checkbox id="status-not-graded" className="mt-0.5" />
+                    <Checkbox
+                      id="status-not-graded"
+                      checked={draftStatusFilters.includes('NOT_GRADED')}
+                      onCheckedChange={(checked) => toggleStatusDraft('NOT_GRADED', !!checked)}
+                      className="mt-0.5"
+                    />
                     <div className="flex flex-col">
                       <span className="text-sm font-medium text-slate-700 flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-amber-500"></span> Not Graded
+                        <span className="w-2 h-2 rounded-full bg-amber-500"></span> Ungraded
                       </span>
                     </div>
                   </label>

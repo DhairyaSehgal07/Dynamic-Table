@@ -3,8 +3,10 @@ import {
   createColumnHelper,
   flexRender,
   getCoreRowModel,
+  getFilteredRowModel,
   getSortedRowModel,
   useReactTable,
+  type ColumnFiltersState,
   type SortingState,
   type VisibilityState,
 } from '@tanstack/react-table'
@@ -59,6 +61,12 @@ const columns = [
   columnHelper.accessor('status', {
     header: 'Status',
     sortingFn: 'text',
+    filterFn: (row, columnId, filterValue: string[]) => {
+      const statusValue = row.getValue(columnId) as string
+      if (!Array.isArray(filterValue)) return true
+      if (filterValue.length === 0) return false
+      return filterValue.includes(statusValue)
+    },
     cell: (info) => {
       const isGraded = info.getValue() === 'GRADED'
       return (
@@ -88,6 +96,7 @@ export default function App() {
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
   const [columnOrder, setColumnOrder] = React.useState<string[]>(defaultColumnOrder)
+  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
 
   const table = useReactTable({
     data,
@@ -96,11 +105,14 @@ export default function App() {
       sorting,
       columnVisibility,
       columnOrder,
+      columnFilters,
     },
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
     onColumnOrderChange: setColumnOrder,
+    onColumnFiltersChange: setColumnFilters,
     getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
   })
 
