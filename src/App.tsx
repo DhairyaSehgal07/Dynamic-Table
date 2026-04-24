@@ -411,12 +411,7 @@ export default function App() {
         )}
       </div>
 
-      <h1> Feature given by Lokesh bhai: </h1>
-      <ol>
-        <li>Column Sizing</li>
-        <li>Grouping</li>
-        <li>Virtualised Rows</li>
-      </ol>
+
 
       {/* Fake Footer/Pagination */}
       <div className="flex items-center justify-between text-sm text-slate-500 px-1">
