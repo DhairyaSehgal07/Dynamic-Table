@@ -1,5 +1,9 @@
 import * as React from 'react'
-import type { Table as TanstackTable } from '@tanstack/react-table'
+import type {
+  ColumnResizeDirection,
+  ColumnResizeMode,
+  Table as TanstackTable,
+} from '@tanstack/react-table'
 import {
   DndContext,
   KeyboardSensor,
@@ -47,6 +51,10 @@ import type { FarmerTableRecord } from '@/data/farmer-table-data'
 
 type SheetDemoButtonProps = {
   table: TanstackTable<FarmerTableRecord>
+  columnResizeMode: ColumnResizeMode
+  setColumnResizeMode: React.Dispatch<React.SetStateAction<ColumnResizeMode>>
+  columnResizeDirection: ColumnResizeDirection
+  setColumnResizeDirection: React.Dispatch<React.SetStateAction<ColumnResizeDirection>>
 }
 
 type StatusFilterValue = 'GRADED' | 'NOT_GRADED'
@@ -119,7 +127,13 @@ function SortableColumnRow({
   )
 }
 
-export function SheetDemoButton({ table }: SheetDemoButtonProps) {
+export function SheetDemoButton({
+  table,
+  columnResizeMode,
+  setColumnResizeMode,
+  columnResizeDirection,
+  setColumnResizeDirection,
+}: SheetDemoButtonProps) {
   const [isOpen, setIsOpen] = React.useState(false)
   const [searchQueries, setSearchQueries] = React.useState<Record<FilterableColumnId, string>>({
     gatePassNumber: '',
@@ -409,7 +423,7 @@ export function SheetDemoButton({ table }: SheetDemoButtonProps) {
 
           {/* --- STICKY TABS LIST --- */}
           <div className="px-6 pt-3 pb-3 border-b border-slate-200 bg-white shadow-sm z-10">
-            <TabsList className="grid w-full grid-cols-3 h-10 bg-slate-100/80 p-1">
+            <TabsList className="grid w-full grid-cols-4 h-10 bg-slate-100/80 p-1">
               <TabsTrigger value="filters" className="gap-2 text-xs font-medium">
                 <SlidersHorizontal className="h-3.5 w-3.5" /> Filters
               </TabsTrigger>
@@ -418,6 +432,9 @@ export function SheetDemoButton({ table }: SheetDemoButtonProps) {
               </TabsTrigger>
               <TabsTrigger value="grouping" className="gap-2 text-xs font-medium">
                 <Rows3 className="h-3.5 w-3.5" /> Grouping
+              </TabsTrigger>
+              <TabsTrigger value="advanced" className="text-xs font-medium">
+                Advanced
               </TabsTrigger>
             </TabsList>
           </div>
@@ -608,6 +625,36 @@ export function SheetDemoButton({ table }: SheetDemoButtonProps) {
                 <Button variant="outline" className="bg-white gap-2">
                   <PlusCircle className="h-4 w-4" /> Add Grouping
                 </Button>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="advanced" className="m-0 space-y-4 focus-visible:ring-0">
+              <Label className="text-sm font-bold text-slate-700 uppercase tracking-wider">
+                Column Sizing
+              </Label>
+              <div className="grid gap-3">
+                <select
+                  value={columnResizeMode}
+                  onChange={(event) =>
+                    setColumnResizeMode(event.target.value as ColumnResizeMode)
+                  }
+                  className="h-10 rounded-md border bg-white px-3 text-sm text-slate-700"
+                >
+                  <option value="onChange">Resize: onChange</option>
+                  <option value="onEnd">Resize: onEnd</option>
+                </select>
+                <select
+                  value={columnResizeDirection}
+                  onChange={(event) =>
+                    setColumnResizeDirection(
+                      event.target.value as ColumnResizeDirection,
+                    )
+                  }
+                  className="h-10 rounded-md border bg-white px-3 text-sm text-slate-700"
+                >
+                  <option value="ltr">Direction: ltr</option>
+                  <option value="rtl">Direction: rtl</option>
+                </select>
               </div>
             </TabsContent>
 

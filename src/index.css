@@ -128,3 +128,29 @@
     @apply font-sans;
     }
 }
+
+.resizer {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: 8px;
+  touch-action: none;
+  user-select: none;
+  opacity: 0;
+}
+
+.resizer.ltr {
+  right: 0;
+  cursor: col-resize;
+}
+
+.resizer.rtl {
+  left: 0;
+  cursor: col-resize;
+}
+
+th:hover > .resizer,
+.resizer.isResizing {
+  opacity: 1;
+  background: color-mix(in oklab, var(--primary) 40%, transparent);
+}

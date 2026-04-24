@@ -1,5 +1,7 @@
 import * as React from 'react'
 import {
+  type ColumnResizeDirection,
+  type ColumnResizeMode,
   createColumnHelper,
   flexRender,
   getCoreRowModel,
@@ -113,6 +115,9 @@ export default function App() {
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
   const [columnOrder, setColumnOrder] = React.useState<string[]>(defaultColumnOrder)
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
+  const [columnResizeMode, setColumnResizeMode] = React.useState<ColumnResizeMode>('onChange')
+  const [columnResizeDirection, setColumnResizeDirection] =
+    React.useState<ColumnResizeDirection>('ltr')
 
   const table = useReactTable({
     data,
@@ -127,6 +132,8 @@ export default function App() {
     onColumnVisibilityChange: setColumnVisibility,
     onColumnOrderChange: setColumnOrder,
     onColumnFiltersChange: setColumnFilters,
+    columnResizeMode,
+    columnResizeDirection,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -143,13 +150,22 @@ export default function App() {
             <Search className="absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
             <Input placeholder="Search gate pass..." className="pl-8 h-9 text-sm rounded-md" />
           </div>
-          <SheetDemoButton table={table} />
+          <SheetDemoButton
+            table={table}
+            columnResizeMode={columnResizeMode}
+            setColumnResizeMode={setColumnResizeMode}
+            columnResizeDirection={columnResizeDirection}
+            setColumnResizeDirection={setColumnResizeDirection}
+          />
         </div>
       </div>
 
       {/* The Grid Container */}
-      <div className="overflow-hidden rounded-b-lg border shadow-sm bg-white">
-        <Table className="w-full text-sm">
+      <div
+        className="overflow-x-auto rounded-b-lg border shadow-sm bg-white"
+        style={{ direction: table.options.columnResizeDirection }}
+      >
+        <Table className="text-sm" style={{ width: table.getTotalSize() }}>
           <TableHeader className="bg-slate-50 border-b-2 border-slate-200">
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id} className="hover:bg-transparent">
@@ -160,7 +176,8 @@ export default function App() {
                   return (
                     <TableHead
                       key={header.id}
-                      className="h-9 px-3 py-2 text-xs font-bold text-slate-600 uppercase tracking-wider border-r last:border-r-0 align-middle select-none hover:bg-slate-200/50 transition-colors"
+                      style={{ width: header.getSize() }}
+                      className="relative h-9 px-3 py-2 text-xs font-bold text-slate-600 uppercase tracking-wider border-r last:border-r-0 align-middle select-none hover:bg-slate-200/50 transition-colors"
                     >
                       {header.isPlaceholder ? null : (
                         // 3. Clickable header area for sorting
@@ -184,6 +201,24 @@ export default function App() {
                           </span>
                         </div>
                       )}
+                      <div
+                        onDoubleClick={() => header.column.resetSize()}
+                        onMouseDown={header.getResizeHandler()}
+                        onTouchStart={header.getResizeHandler()}
+                        onClick={(event) => event.stopPropagation()}
+                        className={`resizer ${table.options.columnResizeDirection} ${
+                          header.column.getIsResizing() ? 'isResizing' : ''
+                        }`}
+                        style={{
+                          transform:
+                            columnResizeMode === 'onEnd' && header.column.getIsResizing()
+                              ? `translateX(${
+                                  (table.options.columnResizeDirection === 'rtl' ? -1 : 1) *
+                                  (table.getState().columnSizingInfo.deltaOffset ?? 0)
+                                }px)`
+                              : '',
+                        }}
+                      />
                     </TableHead>
                   )
                 })}
@@ -202,6 +237,7 @@ export default function App() {
                   {row.getVisibleCells().map((cell) => (
                     <TableCell
                       key={cell.id}
+                      style={{ width: cell.column.getSize() }}
                       className="px-3 py-2 border-r last:border-r-0 align-middle text-slate-700"
                     >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
