@@ -2,6 +2,7 @@ import * as React from 'react'
 import {
   type ColumnResizeDirection,
   type ColumnResizeMode,
+  type FilterFn,
   type GroupingState,
   type Header,
   type Row,
@@ -27,6 +28,12 @@ import { farmerTableData, type FarmerTableRecord } from '@/data/farmer-table-dat
 import { SheetDemoButton } from '@/components/sheet-demo-button'
 
 const columnHelper = createColumnHelper<FarmerTableRecord>()
+const isFirefoxBrowser =
+  typeof window !== 'undefined' && window.navigator.userAgent.includes('Firefox')
+const DEFAULT_COLUMN_SIZE = 180
+const DEFAULT_COLUMN_MIN_SIZE = 120
+const DEFAULT_COLUMN_MAX_SIZE = 360
+
 const multiValueFilterFn = (
   row: { getValue: (columnId: string) => unknown },
   columnId: string,
@@ -74,12 +81,16 @@ const columns = [
     cell: (info) => <div className="text-right tabular-nums">{info.getValue()}</div>,
     sortingFn: 'basic', // Standard number comparison
     filterFn: multiValueFilterFn,
+    minSize: 90,
+    maxSize: 180,
   }),
   columnHelper.accessor('netWeight', {
     header: () => <div className="w-full text-right">Net Wt. (kg)</div>,
     cell: (info) => <div className="text-right tabular-nums font-medium">{info.getValue()}</div>,
     sortingFn: 'basic',
     filterFn: multiValueFilterFn,
+    minSize: 110,
+    maxSize: 220,
   }),
   columnHelper.accessor('status', {
     header: 'Status',
@@ -116,36 +127,14 @@ const defaultColumnOrder = [
 
 type FilterLogic = 'and' | 'or'
 
-function DebouncedInput({
-  value: initialValue,
-  onChange,
-  debounce = 350,
-  ...props
-}: {
-  value: string | number
-  onChange: (value: string) => void
-  debounce?: number
-} & Omit<React.ComponentProps<typeof Input>, 'value' | 'onChange'>) {
-  const [value, setValue] = React.useState(String(initialValue))
-
-  React.useEffect(() => {
-    setValue(String(initialValue))
-  }, [initialValue])
-
-  React.useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      onChange(value)
-    }, debounce)
-    return () => window.clearTimeout(timeout)
-  }, [value, debounce, onChange])
-
-  return (
-    <Input
-      {...props}
-      value={value}
-      onChange={(event) => setValue(event.target.value)}
-    />
-  )
+const globalGatePassFilterFn: FilterFn<FarmerTableRecord> = (
+  row,
+  _columnId: string,
+  filterValue: string,
+) => {
+  const normalized = filterValue.trim().toLowerCase()
+  if (!normalized) return true
+  return String(row.original.gatePassNumber).toLowerCase().includes(normalized)
 }
 
 export default function App() {
@@ -155,7 +144,6 @@ export default function App() {
   const [columnOrder, setColumnOrder] = React.useState<string[]>(defaultColumnOrder)
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
   const [grouping, setGrouping] = React.useState<GroupingState>([])
-  const [gatePassSearch, setGatePassSearch] = React.useState('')
   const [globalFilter, setGlobalFilter] = React.useState('')
   const [filterLogic, setFilterLogic] = React.useState<FilterLogic>('and')
   const [columnResizeMode, setColumnResizeMode] = React.useState<ColumnResizeMode>('onChange')
@@ -164,17 +152,27 @@ export default function App() {
   const tableContainerRef = React.useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = React.useState(0)
 
-  const table = useReactTable({
-    data,
-    columns,
-    state: {
+  const tableState = React.useMemo(
+    () => ({
       sorting,
       columnVisibility,
       columnOrder,
       columnFilters,
       grouping,
       globalFilter,
+    }),
+    [sorting, columnVisibility, columnOrder, columnFilters, grouping, globalFilter],
+  )
+
+  const table = useReactTable<FarmerTableRecord>({
+    data,
+    columns,
+    defaultColumn: {
+      size: DEFAULT_COLUMN_SIZE,
+      minSize: DEFAULT_COLUMN_MIN_SIZE,
+      maxSize: DEFAULT_COLUMN_MAX_SIZE,
     },
+    state: tableState,
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
     onColumnOrderChange: setColumnOrder,
@@ -183,11 +181,7 @@ export default function App() {
     onGlobalFilterChange: setGlobalFilter,
     columnResizeMode,
     columnResizeDirection,
-    globalFilterFn: (row, _columnId, filterValue: string) => {
-      const normalized = filterValue.trim().toLowerCase()
-      if (!normalized) return true
-      return String(row.original.gatePassNumber).toLowerCase().includes(normalized)
-    },
+    globalFilterFn: globalGatePassFilterFn,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getFacetedRowModel: getFacetedRowModel(),
@@ -195,6 +189,7 @@ export default function App() {
     getSortedRowModel: getSortedRowModel(),
     getGroupedRowModel: getGroupedRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
+    getRowId: (row) => String(row.gatePassNumber),
   })
   React.useLayoutEffect(() => {
     const element = tableContainerRef.current
@@ -237,60 +232,60 @@ export default function App() {
     count: rows.length,
     estimateSize: () => 40,
     getScrollElement: () => tableContainerRef.current,
-    measureElement:
-      typeof window !== 'undefined' && navigator.userAgent.indexOf('Firefox') === -1
-        ? (element) => element?.getBoundingClientRect().height
-        : undefined,
+    measureElement: isFirefoxBrowser ? undefined : (element) => element?.getBoundingClientRect().height,
     overscan: 8,
   })
 
   const virtualRows = rowVirtualizer.getVirtualItems()
 
-  const renderHeaderCell = (header: Header<FarmerTableRecord, unknown>) => {
-    const isRightAligned = header.id === 'bags' || header.id === 'netWeight'
-    return (
-      <th
-        key={header.id}
-        style={{ display: 'flex', width: header.getSize(), position: 'relative' }}
-        className="h-9 px-3 py-2 text-xs font-bold text-slate-600 uppercase tracking-wider border-r last:border-r-0 align-middle select-none hover:bg-slate-200/50 transition-colors"
-      >
-        {header.isPlaceholder ? null : (
+  const renderHeaderCell = React.useCallback(
+    (header: Header<FarmerTableRecord, unknown>) => {
+      const isRightAligned = header.id === 'bags' || header.id === 'netWeight'
+      return (
+        <th
+          key={header.id}
+          style={{ display: 'flex', width: header.getSize(), position: 'relative' }}
+          className="h-9 overflow-hidden px-3 py-2 text-xs font-bold text-slate-600 uppercase tracking-wider border-r last:border-r-0 align-middle select-none hover:bg-slate-200/50 transition-colors whitespace-nowrap"
+        >
+          {header.isPlaceholder ? null : (
+            <div
+              className={`flex w-full min-w-0 items-center group cursor-pointer ${isRightAligned ? 'justify-end' : 'justify-between'}`}
+              onClick={header.column.getToggleSortingHandler()}
+            >
+              <span className="truncate">{flexRender(header.column.columnDef.header, header.getContext())}</span>
+              <span className={`${isRightAligned ? 'ml-2' : ''}`}>
+                {{
+                  asc: <ArrowUp className="ml-1 h-3.5 w-3.5 text-slate-800" />,
+                  desc: <ArrowDown className="ml-1 h-3.5 w-3.5 text-slate-800" />,
+                }[header.column.getIsSorted() as string] ?? (
+                  <ArrowUpDown className="ml-1 h-3.5 w-3.5 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                )}
+              </span>
+            </div>
+          )}
           <div
-            className={`flex w-full items-center group cursor-pointer ${isRightAligned ? 'justify-end' : 'justify-between'}`}
-            onClick={header.column.getToggleSortingHandler()}
-          >
-            {flexRender(header.column.columnDef.header, header.getContext())}
-            <span className={`${isRightAligned ? 'ml-2' : ''}`}>
-              {{
-                asc: <ArrowUp className="ml-1 h-3.5 w-3.5 text-slate-800" />,
-                desc: <ArrowDown className="ml-1 h-3.5 w-3.5 text-slate-800" />,
-              }[header.column.getIsSorted() as string] ?? (
-                <ArrowUpDown className="ml-1 h-3.5 w-3.5 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
-              )}
-            </span>
-          </div>
-        )}
-        <div
-          onDoubleClick={() => header.column.resetSize()}
-          onMouseDown={header.getResizeHandler()}
-          onTouchStart={header.getResizeHandler()}
-          onClick={(event) => event.stopPropagation()}
-          className={`resizer ${table.options.columnResizeDirection} ${
-            header.column.getIsResizing() ? 'isResizing' : ''
-          }`}
-          style={{
-            transform:
-              columnResizeMode === 'onEnd' && header.column.getIsResizing()
-                ? `translateX(${
-                    (table.options.columnResizeDirection === 'rtl' ? -1 : 1) *
-                    (table.getState().columnSizingInfo.deltaOffset ?? 0)
-                  }px)`
-                : '',
-          }}
-        />
-      </th>
-    )
-  }
+            onDoubleClick={() => header.column.resetSize()}
+            onMouseDown={header.getResizeHandler()}
+            onTouchStart={header.getResizeHandler()}
+            onClick={(event) => event.stopPropagation()}
+            className={`resizer ${table.options.columnResizeDirection} ${
+              header.column.getIsResizing() ? 'isResizing' : ''
+            }`}
+            style={{
+              transform:
+                columnResizeMode === 'onEnd' && header.column.getIsResizing()
+                  ? `translateX(${
+                      (table.options.columnResizeDirection === 'rtl' ? -1 : 1) *
+                      (table.getState().columnSizingInfo.deltaOffset ?? 0)
+                    }px)`
+                  : '',
+            }}
+          />
+        </th>
+      )
+    },
+    [columnResizeMode, table],
+  )
 
   return (
     <div className="mx-auto max-w-6xl p-6 space-y-4 font-sans">
@@ -301,12 +296,9 @@ export default function App() {
         <div className="flex items-center gap-2">
           <div className="relative w-64">
             <Search className="absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
-            <DebouncedInput
-              value={gatePassSearch}
-              onChange={(value) => {
-                setGatePassSearch(value)
-                table.setGlobalFilter(value)
-              }}
+            <Input
+              value={globalFilter}
+              onChange={(event) => setGlobalFilter(event.target.value)}
               placeholder="Search gate pass..."
               className="pl-8 h-9 text-sm rounded-md"
             />
@@ -396,7 +388,7 @@ export default function App() {
                         <td
                           key={cell.id}
                           style={{ display: 'flex', width: cell.column.getSize() }}
-                          className={`px-3 py-2 border-r last:border-r-0 align-middle text-slate-700 ${
+                          className={`min-w-0 overflow-hidden px-3 py-2 border-r last:border-r-0 align-middle text-slate-700 whitespace-nowrap ${
                             isGroupedCell
                               ? 'bg-emerald-50/70'
                               : isAggregatedCell
