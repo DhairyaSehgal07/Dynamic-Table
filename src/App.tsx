@@ -359,9 +359,8 @@ export default function App() {
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
   const [grouping, setGrouping] = React.useState<GroupingState>([])
   const [globalFilter, setGlobalFilter] = React.useState<GlobalFilterValue>('')
-  const [columnResizeMode, setColumnResizeMode] = React.useState<ColumnResizeMode>('onChange')
-  const [columnResizeDirection, setColumnResizeDirection] =
-    React.useState<ColumnResizeDirection>('ltr')
+  const columnResizeMode: ColumnResizeMode = 'onChange'
+  const columnResizeDirection: ColumnResizeDirection = 'ltr'
   const tableContainerRef = React.useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = React.useState(0)
 
@@ -516,22 +515,21 @@ export default function App() {
     window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000)
   }, [pdfSections, visibleReportColumns])
 
-  const tableTotalSize = table.getTotalSize()
-  const effectiveTableWidth = Math.max(tableTotalSize, containerWidth)
-
-  const columnVirtualizer = useVirtualizer<HTMLDivElement, HTMLTableCellElement>({
-    count: visibleColumns.length,
-    estimateSize: (index) => visibleColumns[index]?.getSize() ?? 160,
-    getScrollElement: () => tableContainerRef.current,
-    horizontal: true,
-    overscan: 3,
-  })
-
-  const virtualColumns = columnVirtualizer.getVirtualItems()
-  const virtualPaddingLeft = virtualColumns[0]?.start ?? 0
-  const virtualPaddingRight =
-    columnVirtualizer.getTotalSize() - (virtualColumns[virtualColumns.length - 1]?.end ?? 0)
-  const containerRightPadding = Math.max(0, effectiveTableWidth - tableTotalSize)
+  const visibleColumnIds = React.useMemo(() => visibleColumns.map((column) => column.id), [visibleColumns])
+  const columnWidthMap = React.useMemo(() => {
+    if (visibleColumns.length === 0) return new Map<string, number>()
+    const fallbackContainerWidth = visibleColumns.length * 120
+    const targetWidth = Math.max(containerWidth, fallbackContainerWidth)
+    const totalColumnSize = visibleColumns.reduce((sum, column) => sum + column.getSize(), 0)
+    const scaleFactor = totalColumnSize > 0 ? targetWidth / totalColumnSize : 1
+    return new Map(
+      visibleColumns.map((column) => {
+        const rawWidth = column.getSize() * scaleFactor
+        const width = Number.isFinite(rawWidth) && rawWidth > 0 ? rawWidth : targetWidth / visibleColumns.length
+        return [column.id, width]
+      }),
+    )
+  }, [containerWidth, visibleColumns])
 
   const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLTableRowElement>({
     count: rows.length,
@@ -549,7 +547,11 @@ export default function App() {
       return (
         <th
           key={header.id}
-          style={{ display: 'flex', width: header.getSize(), position: 'relative' }}
+          style={{
+            display: 'flex',
+            width: columnWidthMap.get(header.id) ?? header.getSize(),
+            position: 'relative',
+          }}
           className="h-9 overflow-hidden px-3 py-2 text-xs font-bold text-slate-600 uppercase tracking-wider border-r last:border-r-0 align-middle select-none hover:bg-slate-200/50 transition-colors whitespace-nowrap"
         >
           {header.isPlaceholder ? null : (
@@ -578,7 +580,7 @@ export default function App() {
             }`}
             style={{
               transform:
-                columnResizeMode === 'onEnd' && header.column.getIsResizing()
+                table.options.columnResizeMode === 'onEnd' && header.column.getIsResizing()
                   ? `translateX(${
                       (table.options.columnResizeDirection === 'rtl' ? -1 : 1) *
                       (table.getState().columnSizingInfo.deltaOffset ?? 0)
@@ -589,7 +591,7 @@ export default function App() {
         </th>
       )
     },
-    [columnResizeMode, table],
+    [columnWidthMap, table],
   )
 
   return (
@@ -611,10 +613,6 @@ export default function App() {
           <SheetDemoButton
             table={table}
             defaultColumnOrder={defaultColumnOrder}
-            columnResizeMode={columnResizeMode}
-            setColumnResizeMode={setColumnResizeMode}
-            columnResizeDirection={columnResizeDirection}
-            setColumnResizeDirection={setColumnResizeDirection}
           />
           <Button
             type="button"
@@ -634,7 +632,7 @@ export default function App() {
       {/* The Grid Container */}
       <div
         ref={tableContainerRef}
-        className="overflow-auto rounded-b-lg border shadow-sm bg-white"
+        className="overflow-y-auto overflow-x-hidden rounded-b-lg border shadow-sm bg-white"
         style={{ direction: table.options.columnResizeDirection, height: '560px', position: 'relative' }}
       >
         {rows.length === 0 ? (
@@ -642,29 +640,20 @@ export default function App() {
             No records found.
           </div>
         ) : (
-          <table style={{ display: 'grid', width: effectiveTableWidth }} className="text-sm">
+          <table style={{ display: 'grid', width: '100%' }} className="text-sm">
             <thead
               className="bg-slate-50 border-b-2 border-slate-200"
               style={{ display: 'grid', position: 'sticky', top: 0, zIndex: 10 }}
             >
               {table.getHeaderGroups().map((headerGroup) => (
                 <tr key={headerGroup.id} style={{ display: 'flex', width: '100%' }}>
-                  {virtualPaddingLeft ? <th style={{ display: 'flex', width: virtualPaddingLeft }} /> : null}
-                  {virtualColumns.map((virtualColumn) => {
-                    const header = headerGroup.headers[virtualColumn.index] as
+                  {visibleColumnIds.map((columnId) => {
+                    const header = headerGroup.headers.find((groupHeader) => groupHeader.id === columnId) as
                       | Header<FarmerTableRecord, unknown>
                       | undefined
                     if (!header) return null
                     return renderHeaderCell(header)
                   })}
-                  {virtualPaddingRight + containerRightPadding ? (
-                    <th
-                      style={{
-                        display: 'flex',
-                        width: virtualPaddingRight + containerRightPadding,
-                      }}
-                    />
-                  ) : null}
                 </tr>
               ))}
             </thead>
@@ -692,9 +681,8 @@ export default function App() {
                       backgroundColor: virtualRow.index % 2 === 0 ? 'white' : 'rgb(248 250 252 / 0.3)',
                     }}
                   >
-                    {virtualPaddingLeft ? <td style={{ display: 'flex', width: virtualPaddingLeft }} /> : null}
-                    {virtualColumns.map((virtualColumn) => {
-                      const cell = visibleCells[virtualColumn.index]
+                    {visibleColumnIds.map((columnId) => {
+                      const cell = visibleCells.find((visibleCell) => visibleCell.column.id === columnId)
                       if (!cell) return null
                       const isGroupedCell = cell.getIsGrouped()
                       const isAggregatedCell = cell.getIsAggregated()
@@ -702,7 +690,10 @@ export default function App() {
                       return (
                         <td
                           key={cell.id}
-                          style={{ display: 'flex', width: cell.column.getSize() }}
+                          style={{
+                            display: 'flex',
+                            width: columnWidthMap.get(cell.column.id) ?? cell.column.getSize(),
+                          }}
                           className={`min-w-0 overflow-hidden px-3 py-2 border-r last:border-r-0 align-middle text-slate-700 whitespace-nowrap ${
                             isGroupedCell
                               ? 'bg-emerald-50/70'
@@ -736,14 +727,6 @@ export default function App() {
                         </td>
                       )
                     })}
-                    {virtualPaddingRight + containerRightPadding ? (
-                      <td
-                        style={{
-                          display: 'flex',
-                          width: virtualPaddingRight + containerRightPadding,
-                        }}
-                      />
-                    ) : null}
                   </tr>
                 )
               })}
