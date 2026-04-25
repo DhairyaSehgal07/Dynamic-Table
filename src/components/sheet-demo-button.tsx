@@ -116,6 +116,8 @@ const filterOperatorLabels: Record<FilterOperator, string> = {
   '<=': 'less than or equal',
 }
 
+const statusFilterOptions = ['GRADED', 'NOT_GRADED']
+
 const mutateFilterNodeById = (
   group: FilterGroupNode,
   targetId: string,
@@ -336,6 +338,32 @@ export function SheetDemoButton({
   const orderedColumns = draftColumnOrder
     .map((columnId) => columnMap.get(columnId))
     .filter((column) => column !== undefined)
+  const advancedFieldValueOptions = React.useMemo<Record<FilterField, string[]>>(() => {
+    const options: Record<FilterField, string[]> = {
+      gatePassNumber: [],
+      date: [],
+      farmer: [],
+      variety: [],
+      bags: [],
+      netWeight: [],
+      status: [...statusFilterOptions],
+    }
+
+    advancedFilterFields.forEach(({ id }) => {
+      const facetedValues = table.getColumn(id)?.getFacetedUniqueValues()
+      if (!facetedValues) return
+      const values = Array.from(facetedValues.keys()).map((value) => String(value))
+      options[id] = numericFilterFields.includes(id)
+        ? values.sort((a, b) => Number(a) - Number(b))
+        : values.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    })
+
+    if (options.status.length === 0) {
+      options.status = [...statusFilterOptions]
+    }
+
+    return options
+  }, [table])
 
   const syncDraftFromTable = () => {
     const nextDraft: Record<string, boolean> = {}
@@ -746,10 +774,10 @@ export function SheetDemoButton({
       */}
       <SheetContent
         side="right"
-        className="flex flex-col w-full sm:max-w-[680px] p-0 gap-0 bg-slate-50/50 border-l"
+        className="flex flex-col p-0 gap-0 bg-slate-50/50 border-l data-[side=right]:w-[92vw] data-[side=right]:max-w-none data-[side=right]:sm:max-w-[700px]"
       >
         {/* --- STICKY HEADER --- */}
-        <div className="px-6 py-5 border-b border-slate-200 bg-white">
+        <div className="px-6 py-3 border-b border-slate-200 bg-white">
           <SheetHeader>
             <SheetTitle className="text-xl font-semibold text-slate-800">
               Customize View
@@ -763,8 +791,8 @@ export function SheetDemoButton({
         <Tabs defaultValue="filters" className="flex flex-col flex-1 overflow-hidden">
 
           {/* --- STICKY TABS LIST --- */}
-          <div className="px-6 pt-3 pb-3 border-b border-slate-200 bg-white shadow-sm z-10">
-            <TabsList className="grid w-full grid-cols-4 h-10 bg-slate-100/80 p-1">
+          <div className="px-6 pt-2 pb-2 border-b border-slate-200 bg-white shadow-sm z-10">
+            <TabsList className="grid w-full grid-cols-4 h-9 bg-slate-100/80 p-1">
               <TabsTrigger value="filters" className="gap-2 text-xs font-medium">
                 <SlidersHorizontal className="h-3.5 w-3.5" /> Filters
               </TabsTrigger>
@@ -883,7 +911,7 @@ export function SheetDemoButton({
 
                               const isNumeric = numericFilterFields.includes(node.field)
                               const operators = isNumeric ? numberOperators : stringOperators
-                              const isStatusField = node.field === 'status'
+                              const valueOptions = advancedFieldValueOptions[node.field] ?? []
 
                               return (
                                 <div
@@ -919,24 +947,20 @@ export function SheetDemoButton({
                                       </option>
                                     ))}
                                   </select>
-                                  {isStatusField ? (
-                                    <select
-                                      value={node.value}
-                                      onChange={(event) => setConditionValue(node.id, event.target.value)}
-                                      className="h-9 rounded-md border bg-white px-2 text-xs text-slate-700 sm:col-span-4"
-                                    >
-                                      <option value="">Select status...</option>
-                                      <option value="GRADED">GRADED</option>
-                                      <option value="NOT_GRADED">NOT_GRADED</option>
-                                    </select>
-                                  ) : (
-                                    <Input
-                                      value={node.value}
-                                      onChange={(event) => setConditionValue(node.id, event.target.value)}
-                                      placeholder={isNumeric ? 'Enter a number...' : 'Enter a value...'}
-                                      className="h-9 text-xs sm:col-span-4"
-                                    />
-                                  )}
+                                  <select
+                                    value={node.value}
+                                    onChange={(event) => setConditionValue(node.id, event.target.value)}
+                                    className="h-9 rounded-md border bg-white px-2 text-xs text-slate-700 sm:col-span-4"
+                                  >
+                                    <option value="">
+                                      {valueOptions.length > 0 ? 'Select value...' : 'No values available'}
+                                    </option>
+                                    {valueOptions.map((value) => (
+                                      <option key={`${node.id}-${value}`} value={value}>
+                                        {value}
+                                      </option>
+                                    ))}
+                                  </select>
                                   <Button
                                     type="button"
                                     variant="ghost"
@@ -1247,23 +1271,23 @@ export function SheetDemoButton({
         </Tabs>
 
         {/* --- STICKY FOOTER --- */}
-        <div className="px-6 py-4 border-t border-slate-200 bg-white">
+        <div className="px-6 py-2 border-t border-slate-200 bg-white">
           <SheetFooter className="flex flex-row justify-between sm:justify-between w-full items-center">
             <Button
               type="button"
               variant="ghost"
-              className="text-slate-500 hover:text-slate-800 font-medium px-2 h-9"
+              className="text-slate-500 hover:text-slate-800 font-medium px-2 h-8"
               onClick={handleClearAll}
             >
               Clear All
             </Button>
             <div className="flex gap-2">
-              <Button type="button" variant="outline" className="h-9" onClick={() => setIsOpen(false)}>
+              <Button type="button" variant="outline" className="h-8" onClick={() => setIsOpen(false)}>
                 Cancel
               </Button>
               <Button
                 type="button"
-                className="h-9 bg-blue-600 hover:bg-blue-700 text-white shadow-sm px-6"
+                className="h-8 bg-blue-600 hover:bg-blue-700 text-white shadow-sm px-5"
                 onClick={handleApplyView}
               >
                 Apply View
