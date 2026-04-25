@@ -47,14 +47,27 @@ import {
   GripVertical,
   Search,
   ChevronDown,
+  Plus,
+  Trash2,
 } from 'lucide-react'
 import type { FarmerTableRecord } from '@/data/farmer-table-data'
+import {
+  createDefaultCondition,
+  createDefaultFilterGroup,
+  getDefaultOperatorForField,
+  hasAnyUsableFilter,
+  isAdvancedFilterGroup,
+  numericFilterFields,
+  type FilterConditionNode,
+  type FilterField,
+  type FilterGroupNode,
+  type FilterNode,
+  type FilterOperator,
+} from '@/lib/advanced-filters'
 
 type SheetDemoButtonProps = {
   table: TanstackTable<FarmerTableRecord>
   defaultColumnOrder: string[]
-  filterLogic: 'and' | 'or'
-  setFilterLogic: React.Dispatch<React.SetStateAction<'and' | 'or'>>
   columnResizeMode: ColumnResizeMode
   setColumnResizeMode: React.Dispatch<React.SetStateAction<ColumnResizeMode>>
   columnResizeDirection: ColumnResizeDirection
@@ -78,6 +91,58 @@ const filterableColumns: Array<{ id: FilterableColumnId; label: string; searchab
   { id: 'bags', label: 'Bags', searchable: true },
   { id: 'netWeight', label: 'Net Weight (kg)', searchable: true },
 ]
+
+const advancedFilterFields: Array<{ id: FilterField; label: string; type: 'string' | 'number' }> = [
+  { id: 'gatePassNumber', label: 'Gate Pass Number', type: 'number' },
+  { id: 'date', label: 'Date', type: 'string' },
+  { id: 'farmer', label: 'Farmer', type: 'string' },
+  { id: 'variety', label: 'Variety', type: 'string' },
+  { id: 'bags', label: 'Bags', type: 'number' },
+  { id: 'netWeight', label: 'Net Weight (kg)', type: 'number' },
+  { id: 'status', label: 'Status', type: 'string' },
+]
+
+const stringOperators: FilterOperator[] = ['contains', '=', '!=', 'startsWith', 'endsWith']
+const numberOperators: FilterOperator[] = ['=', '!=', '>', '>=', '<', '<=']
+const filterOperatorLabels: Record<FilterOperator, string> = {
+  contains: 'contains',
+  startsWith: 'starts with',
+  endsWith: 'ends with',
+  '=': 'is',
+  '!=': 'is not',
+  '>': 'greater than',
+  '>=': 'greater than or equal',
+  '<': 'less than',
+  '<=': 'less than or equal',
+}
+
+const mutateFilterNodeById = (
+  group: FilterGroupNode,
+  targetId: string,
+  updater: (node: FilterNode) => FilterNode,
+): FilterGroupNode => {
+  if (group.id === targetId) {
+    const updatedNode = updater(group)
+    if (updatedNode.type === 'group') return updatedNode
+    return group
+  }
+
+  return {
+    ...group,
+    conditions: group.conditions.map((node) => {
+      if (node.id === targetId) return updater(node)
+      if (node.type === 'group') return mutateFilterNodeById(node, targetId, updater)
+      return node
+    }),
+  }
+}
+
+const removeFilterNodeById = (group: FilterGroupNode, nodeId: string): FilterGroupNode => ({
+  ...group,
+  conditions: group.conditions
+    .filter((node) => node.id !== nodeId)
+    .map((node) => (node.type === 'group' ? removeFilterNodeById(node, nodeId) : node)),
+})
 
 type SortableColumnRowProps = {
   columnId: string
@@ -200,8 +265,6 @@ function GroupingDropZone({ index, isActive }: GroupingDropZoneProps) {
 export function SheetDemoButton({
   table,
   defaultColumnOrder,
-  filterLogic,
-  setFilterLogic,
   columnResizeMode,
   setColumnResizeMode,
   columnResizeDirection,
@@ -239,7 +302,9 @@ export function SheetDemoButton({
     netWeight: [],
   })
   const [draftGrouping, setDraftGrouping] = React.useState<string[]>([])
-  const [draftFilterLogic, setDraftFilterLogic] = React.useState<'and' | 'or'>(filterLogic)
+  const [draftLogicFilter, setDraftLogicFilter] = React.useState<FilterGroupNode>(
+    createDefaultFilterGroup(),
+  )
   const sensors = useSensors(
     useSensor(MouseSensor),
     useSensor(TouchSensor),
@@ -310,13 +375,16 @@ export function SheetDemoButton({
     })
     setDraftValueFilters(nextValueFilters)
     setDraftGrouping(table.getState().grouping)
+    const activeGlobalFilter = table.getState().globalFilter
+    setDraftLogicFilter(
+      isAdvancedFilterGroup(activeGlobalFilter) ? activeGlobalFilter : createDefaultFilterGroup(),
+    )
   }
 
   const handleOpenChange = (nextOpen: boolean) => {
     setIsOpen(nextOpen)
     if (nextOpen) {
       syncDraftFromTable()
-      setDraftFilterLogic(filterLogic)
       setSearchQueries({
         gatePassNumber: '',
         date: '',
@@ -379,7 +447,6 @@ export function SheetDemoButton({
     setDraftStatusFilters(['GRADED', 'NOT_GRADED'])
     setDraftValueFilters(resetValueFilters)
     setDraftGrouping([])
-    setDraftFilterLogic('and')
     setSearchQueries({
       gatePassNumber: '',
       date: '',
@@ -396,12 +463,13 @@ export function SheetDemoButton({
       bags: false,
       netWeight: false,
     })
+    setDraftLogicFilter(createDefaultFilterGroup())
 
     table.setColumnVisibility({})
     table.setColumnOrder(resetOrder)
     table.resetColumnFilters()
+    table.setGlobalFilter('')
     table.setGrouping([])
-    setFilterLogic('and')
     setColumnResizeMode('onChange')
     setColumnResizeDirection('ltr')
   }
@@ -426,7 +494,11 @@ export function SheetDemoButton({
       }
     })
     table.setGrouping(draftGrouping)
-    setFilterLogic(draftFilterLogic)
+    if (hasAnyUsableFilter(draftLogicFilter)) {
+      table.setGlobalFilter(draftLogicFilter)
+    } else if (isAdvancedFilterGroup(table.getState().globalFilter)) {
+      table.setGlobalFilter('')
+    }
     setIsOpen(false)
   }
 
@@ -486,6 +558,68 @@ export function SheetDemoButton({
     const allValues = availableFilterOptions[columnId]
     if (!query) return allValues
     return allValues.filter((option) => option.toLowerCase().includes(query))
+  }
+
+  const setGroupOperator = (groupId: string, operator: 'AND' | 'OR') => {
+    setDraftLogicFilter((current) =>
+      mutateFilterNodeById(current, groupId, (node) =>
+        node.type === 'group' ? { ...node, operator } : node,
+      ),
+    )
+  }
+
+  const addConditionToGroup = (groupId: string) => {
+    setDraftLogicFilter((current) =>
+      mutateFilterNodeById(current, groupId, (node) =>
+        node.type === 'group'
+          ? { ...node, conditions: [...node.conditions, createDefaultCondition()] }
+          : node,
+      ),
+    )
+  }
+
+  const addNestedGroup = (groupId: string) => {
+    setDraftLogicFilter((current) =>
+      mutateFilterNodeById(current, groupId, (node) =>
+        node.type === 'group'
+          ? { ...node, conditions: [...node.conditions, createDefaultFilterGroup()] }
+          : node,
+      ),
+    )
+  }
+
+  const removeNode = (nodeId: string) => {
+    setDraftLogicFilter((current) => removeFilterNodeById(current, nodeId))
+  }
+
+  const setConditionField = (conditionId: string, field: FilterField) => {
+    setDraftLogicFilter((current) =>
+      mutateFilterNodeById(current, conditionId, (node) => {
+        if (node.type !== 'condition') return node
+        return {
+          ...node,
+          field,
+          operator: getDefaultOperatorForField(field),
+          value: '',
+        }
+      }),
+    )
+  }
+
+  const setConditionOperator = (conditionId: string, operator: FilterOperator) => {
+    setDraftLogicFilter((current) =>
+      mutateFilterNodeById(current, conditionId, (node) =>
+        node.type === 'condition' ? { ...node, operator } : node,
+      ),
+    )
+  }
+
+  const setConditionValue = (conditionId: string, value: string) => {
+    setDraftLogicFilter((current) =>
+      mutateFilterNodeById(current, conditionId, (node) =>
+        node.type === 'condition' ? { ...node, value } : node,
+      ),
+    )
   }
 
   const handleColumnDragEnd = (event: DragEndEvent) => {
@@ -652,26 +786,175 @@ export function SheetDemoButton({
             {/* TAB 1: FILTERS */}
             <TabsContent value="filters" className="m-0 space-y-8 focus-visible:ring-0">
               <div className="space-y-3">
-                <Label className="text-sm font-bold text-slate-700 uppercase tracking-wider">
-                  Match Logic
-                </Label>
-                <div className="grid grid-cols-2 gap-2 rounded-md border border-slate-200 bg-white p-1 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-bold text-slate-700 uppercase tracking-wider">
+                    Logic Builder (AND / OR)
+                  </Label>
                   <Button
                     type="button"
-                    variant={draftFilterLogic === 'and' ? 'default' : 'ghost'}
-                    className="h-9 text-xs font-semibold uppercase tracking-wide"
-                    onClick={() => setDraftFilterLogic('and')}
+                    variant="ghost"
+                    className="h-8 px-2 text-xs text-blue-600"
+                    onClick={() => setDraftLogicFilter(createDefaultFilterGroup())}
                   >
-                    AND
+                    Reset Logic
                   </Button>
-                  <Button
-                    type="button"
-                    variant={draftFilterLogic === 'or' ? 'default' : 'ghost'}
-                    className="h-9 text-xs font-semibold uppercase tracking-wide"
-                    onClick={() => setDraftFilterLogic('or')}
-                  >
-                    OR
-                  </Button>
+                </div>
+                <div className="rounded-lg border border-blue-100 bg-linear-to-b from-blue-50/40 to-white p-4 shadow-sm">
+                  <p className="text-xs text-slate-600 mb-3 leading-relaxed">
+                    Build grouped logic like: status = GRADED AND (bags &gt; 10 OR variety contains
+                    basmati).
+                  </p>
+
+                  {(() => {
+                    const renderGroup = (group: FilterGroupNode, depth = 0): React.ReactNode => (
+                      <div
+                        key={group.id}
+                        className={`space-y-3 rounded-md border p-3 ${
+                          depth > 0
+                            ? 'border-slate-200 bg-slate-50/80'
+                            : 'border-blue-100 bg-white shadow-[inset_0_0_0_1px_rgba(59,130,246,0.04)]'
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="inline-flex h-6 items-center rounded-full bg-slate-100 px-2 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                            Group
+                          </span>
+                          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Match
+                          </span>
+                          <select
+                            value={group.operator}
+                            onChange={(event) =>
+                              setGroupOperator(group.id, event.target.value as 'AND' | 'OR')
+                            }
+                            className="h-8 rounded-md border bg-white px-2 text-xs font-semibold text-slate-700"
+                          >
+                            <option value="AND">ALL (AND)</option>
+                            <option value="OR">ANY (OR)</option>
+                          </select>
+                          <span className="text-xs text-slate-500">of these conditions</span>
+                          <div className="ml-auto flex flex-wrap items-center gap-1">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-7 px-2 text-xs"
+                              onClick={() => addConditionToGroup(group.id)}
+                            >
+                              <Plus className="h-3.5 w-3.5 mr-1" />
+                              Add Condition
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-7 px-2 text-xs"
+                              onClick={() => addNestedGroup(group.id)}
+                            >
+                              <Plus className="h-3.5 w-3.5 mr-1" />
+                              Add Group
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          {group.conditions.length === 0 ? (
+                            <div className="rounded border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-500">
+                              No conditions yet.
+                            </div>
+                          ) : (
+                            group.conditions.map((node) => {
+                              if (node.type === 'group') {
+                                return (
+                                  <div key={node.id} className="space-y-2">
+                                    {renderGroup(node, depth + 1)}
+                                    <div className="flex justify-end">
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        className="h-7 px-2 text-xs text-red-600"
+                                        onClick={() => removeNode(node.id)}
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5 mr-1" />
+                                        Remove Group
+                                      </Button>
+                                    </div>
+                                  </div>
+                                )
+                              }
+
+                              const isNumeric = numericFilterFields.includes(node.field)
+                              const operators = isNumeric ? numberOperators : stringOperators
+                              const isStatusField = node.field === 'status'
+
+                              return (
+                                <div
+                                  key={node.id}
+                                  className="grid grid-cols-1 gap-2 rounded-md border border-slate-200 bg-white p-2 sm:grid-cols-12"
+                                >
+                                  <select
+                                    value={node.field}
+                                    onChange={(event) =>
+                                      setConditionField(node.id, event.target.value as FilterField)
+                                    }
+                                    className="h-9 rounded-md border bg-white px-2 text-xs text-slate-700 sm:col-span-4"
+                                  >
+                                    {advancedFilterFields.map((field) => (
+                                      <option key={field.id} value={field.id}>
+                                        {field.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <select
+                                    value={node.operator}
+                                    onChange={(event) =>
+                                      setConditionOperator(
+                                        node.id,
+                                        event.target.value as FilterConditionNode['operator'],
+                                      )
+                                    }
+                                    className="h-9 rounded-md border bg-white px-2 text-xs text-slate-700 sm:col-span-3"
+                                  >
+                                    {operators.map((operator) => (
+                                      <option key={operator} value={operator}>
+                                        {filterOperatorLabels[operator]}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  {isStatusField ? (
+                                    <select
+                                      value={node.value}
+                                      onChange={(event) => setConditionValue(node.id, event.target.value)}
+                                      className="h-9 rounded-md border bg-white px-2 text-xs text-slate-700 sm:col-span-4"
+                                    >
+                                      <option value="">Select status...</option>
+                                      <option value="GRADED">GRADED</option>
+                                      <option value="NOT_GRADED">NOT_GRADED</option>
+                                    </select>
+                                  ) : (
+                                    <Input
+                                      value={node.value}
+                                      onChange={(event) => setConditionValue(node.id, event.target.value)}
+                                      placeholder={isNumeric ? 'Enter a number...' : 'Enter a value...'}
+                                      className="h-9 text-xs sm:col-span-4"
+                                    />
+                                  )}
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    className="h-9 px-2 text-red-600 sm:col-span-1"
+                                    onClick={() => removeNode(node.id)}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              )
+                            })
+                          )}
+                        </div>
+                      </div>
+                    )
+
+                    return renderGroup(draftLogicFilter)
+                  })()}
                 </div>
               </div>
 

@@ -28,6 +28,7 @@ import { Input } from '@/components/ui/input'
 import { Search, ArrowUpDown, ArrowDown, ArrowUp, FileText } from 'lucide-react'
 import { farmerTableData, type FarmerTableRecord } from '@/data/farmer-table-data'
 import { SheetDemoButton } from '@/components/sheet-demo-button'
+import { evaluateFilterGroup, isAdvancedFilterGroup, type FilterGroupNode } from '@/lib/advanced-filters'
 
 const columnHelper = createColumnHelper<FarmerTableRecord>()
 const isFirefoxBrowser =
@@ -335,13 +336,16 @@ const defaultColumnOrder = [
   'status',
 ]
 
-type FilterLogic = 'and' | 'or'
+type GlobalFilterValue = string | FilterGroupNode
 
 const globalGatePassFilterFn: FilterFn<FarmerTableRecord> = (
   row,
   _columnId: string,
-  filterValue: string,
+  filterValue: GlobalFilterValue,
 ) => {
+  if (isAdvancedFilterGroup(filterValue)) {
+    return evaluateFilterGroup(row.original, filterValue)
+  }
   const normalized = filterValue.trim().toLowerCase()
   if (!normalized) return true
   return String(row.original.gatePassNumber).toLowerCase().includes(normalized)
@@ -354,8 +358,7 @@ export default function App() {
   const [columnOrder, setColumnOrder] = React.useState<string[]>(defaultColumnOrder)
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
   const [grouping, setGrouping] = React.useState<GroupingState>([])
-  const [globalFilter, setGlobalFilter] = React.useState('')
-  const [filterLogic, setFilterLogic] = React.useState<FilterLogic>('and')
+  const [globalFilter, setGlobalFilter] = React.useState<GlobalFilterValue>('')
   const [columnResizeMode, setColumnResizeMode] = React.useState<ColumnResizeMode>('onChange')
   const [columnResizeDirection, setColumnResizeDirection] =
     React.useState<ColumnResizeDirection>('ltr')
@@ -599,7 +602,7 @@ export default function App() {
           <div className="relative w-64">
             <Search className="absolute left-2 top-2.5 h-4 w-4 text-slate-400" />
             <Input
-              value={globalFilter}
+              value={typeof globalFilter === 'string' ? globalFilter : ''}
               onChange={(event) => setGlobalFilter(event.target.value)}
               placeholder="Search gate pass..."
               className="pl-8 h-9 text-sm rounded-md"
@@ -608,8 +611,6 @@ export default function App() {
           <SheetDemoButton
             table={table}
             defaultColumnOrder={defaultColumnOrder}
-            filterLogic={filterLogic}
-            setFilterLogic={setFilterLogic}
             columnResizeMode={columnResizeMode}
             setColumnResizeMode={setColumnResizeMode}
             columnResizeDirection={columnResizeDirection}
