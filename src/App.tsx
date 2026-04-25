@@ -359,10 +359,9 @@ export default function App() {
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
   const [grouping, setGrouping] = React.useState<GroupingState>([])
   const [globalFilter, setGlobalFilter] = React.useState<GlobalFilterValue>('')
-  const columnResizeMode: ColumnResizeMode = 'onChange'
-  const columnResizeDirection: ColumnResizeDirection = 'ltr'
+  const [columnResizeMode, setColumnResizeMode] = React.useState<ColumnResizeMode>('onChange')
+  const [columnResizeDirection, setColumnResizeDirection] = React.useState<ColumnResizeDirection>('ltr')
   const tableContainerRef = React.useRef<HTMLDivElement>(null)
-  const [containerWidth, setContainerWidth] = React.useState(0)
 
   const tableState = React.useMemo(
     () => ({
@@ -403,23 +402,6 @@ export default function App() {
     getExpandedRowModel: getExpandedRowModel(),
     getRowId: (row) => String(row.gatePassNumber),
   })
-  React.useLayoutEffect(() => {
-    const element = tableContainerRef.current
-    if (!element) return
-
-    const updateWidth = () => {
-      setContainerWidth(element.clientWidth)
-    }
-
-    updateWidth()
-    const observer = new ResizeObserver(updateWidth)
-    observer.observe(element)
-
-    return () => {
-      observer.disconnect()
-    }
-  }, [])
-
   const visibleColumns = table.getVisibleLeafColumns()
   const rows = table.getRowModel().rows
   const groupedRows = table.getGroupedRowModel().rows
@@ -516,20 +498,6 @@ export default function App() {
   }, [pdfSections, visibleReportColumns])
 
   const visibleColumnIds = React.useMemo(() => visibleColumns.map((column) => column.id), [visibleColumns])
-  const columnWidthMap = React.useMemo(() => {
-    if (visibleColumns.length === 0) return new Map<string, number>()
-    const fallbackContainerWidth = visibleColumns.length * 120
-    const targetWidth = Math.max(containerWidth, fallbackContainerWidth)
-    const totalColumnSize = visibleColumns.reduce((sum, column) => sum + column.getSize(), 0)
-    const scaleFactor = totalColumnSize > 0 ? targetWidth / totalColumnSize : 1
-    return new Map(
-      visibleColumns.map((column) => {
-        const rawWidth = column.getSize() * scaleFactor
-        const width = Number.isFinite(rawWidth) && rawWidth > 0 ? rawWidth : targetWidth / visibleColumns.length
-        return [column.id, width]
-      }),
-    )
-  }, [containerWidth, visibleColumns])
 
   const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLTableRowElement>({
     count: rows.length,
@@ -549,7 +517,7 @@ export default function App() {
           key={header.id}
           style={{
             display: 'flex',
-            width: columnWidthMap.get(header.id) ?? header.getSize(),
+            width: header.getSize(),
             position: 'relative',
           }}
           className="h-9 overflow-hidden px-3 py-2 text-xs font-bold text-slate-600 uppercase tracking-wider border-r last:border-r-0 align-middle select-none hover:bg-slate-200/50 transition-colors whitespace-nowrap"
@@ -591,7 +559,7 @@ export default function App() {
         </th>
       )
     },
-    [columnWidthMap, table],
+    [table],
   )
 
   return (
@@ -613,6 +581,10 @@ export default function App() {
           <SheetDemoButton
             table={table}
             defaultColumnOrder={defaultColumnOrder}
+            columnResizeMode={columnResizeMode}
+            columnResizeDirection={columnResizeDirection}
+            onColumnResizeModeChange={setColumnResizeMode}
+            onColumnResizeDirectionChange={setColumnResizeDirection}
           />
           <Button
             type="button"
@@ -632,7 +604,7 @@ export default function App() {
       {/* The Grid Container */}
       <div
         ref={tableContainerRef}
-        className="overflow-y-auto overflow-x-hidden rounded-b-lg border shadow-sm bg-white"
+        className="overflow-y-auto overflow-x-auto rounded-b-lg border shadow-sm bg-white"
         style={{ direction: table.options.columnResizeDirection, height: '560px', position: 'relative' }}
       >
         {rows.length === 0 ? (
@@ -640,7 +612,7 @@ export default function App() {
             No records found.
           </div>
         ) : (
-          <table style={{ display: 'grid', width: '100%' }} className="text-sm">
+          <table style={{ display: 'grid', width: table.getTotalSize() }} className="text-sm">
             <thead
               className="bg-slate-50 border-b-2 border-slate-200"
               style={{ display: 'grid', position: 'sticky', top: 0, zIndex: 10 }}
@@ -692,7 +664,7 @@ export default function App() {
                           key={cell.id}
                           style={{
                             display: 'flex',
-                            width: columnWidthMap.get(cell.column.id) ?? cell.column.getSize(),
+                            width: cell.column.getSize(),
                           }}
                           className={`min-w-0 overflow-hidden px-3 py-2 border-r last:border-r-0 align-middle text-slate-700 whitespace-nowrap ${
                             isGroupedCell

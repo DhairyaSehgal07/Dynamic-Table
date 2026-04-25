@@ -73,6 +73,10 @@ import {
 type SheetDemoButtonProps = {
   table: TanstackTable<FarmerTableRecord>
   defaultColumnOrder: string[]
+  columnResizeMode: 'onChange' | 'onEnd'
+  columnResizeDirection: 'ltr' | 'rtl'
+  onColumnResizeModeChange: (mode: 'onChange' | 'onEnd') => void
+  onColumnResizeDirectionChange: (direction: 'ltr' | 'rtl') => void
 }
 
 type StatusFilterValue = 'GRADED' | 'NOT_GRADED'
@@ -278,6 +282,10 @@ function SectionLabel({ children, action }: { children: React.ReactNode; action?
 export function SheetDemoButton({
   table,
   defaultColumnOrder,
+  columnResizeMode,
+  columnResizeDirection,
+  onColumnResizeModeChange,
+  onColumnResizeDirectionChange,
 }: SheetDemoButtonProps) {
   const [isOpen, setIsOpen] = React.useState(false)
   const [activeTab, setActiveTab] = React.useState('filters')
@@ -459,6 +467,7 @@ export function SheetDemoButton({
     table.resetColumnFilters()
     table.setGlobalFilter('')
     table.setGrouping([])
+    table.resetColumnSizing()
   }
 
   const handleApplyView = () => {
@@ -1151,7 +1160,6 @@ export function SheetDemoButton({
               {/* ── TAB: ADVANCED ── */}
               <TabsContent value="advanced" className="m-0 focus-visible:ring-0">
                 <div className="p-5 space-y-6">
-
                   {/* Logic Filter Builder */}
                   <div>
                     <SectionLabel
@@ -1171,6 +1179,84 @@ export function SheetDemoButton({
                       Combine filters with AND / OR logic. E.g. status is Graded AND bags &gt; 10.
                     </p>
                     {renderGroup(draftLogicFilter)}
+                  </div>
+
+                  <div>
+                    <SectionLabel
+                      action={
+                        <button
+                          type="button"
+                          className="text-xs text-slate-500 hover:text-slate-700 font-medium flex items-center gap-1"
+                          onClick={() => {
+                            onColumnResizeModeChange('onChange')
+                            onColumnResizeDirectionChange('ltr')
+                            table.resetColumnSizing()
+                          }}
+                        >
+                          <RotateCcw className="h-3 w-3" /> Reset
+                        </button>
+                      }
+                    >
+                      Column Resizing
+                    </SectionLabel>
+                    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-3">
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+                          Resize Mode
+                        </p>
+                        <div className="flex gap-2">
+                          {([
+                            { value: 'onChange' as const, label: 'Live (onChange)' },
+                            { value: 'onEnd' as const, label: 'On release (onEnd)' },
+                          ]).map((option) => (
+                            <button
+                              key={option.value}
+                              type="button"
+                              onClick={() => onColumnResizeModeChange(option.value)}
+                              className={`rounded-md border px-2.5 py-1.5 text-xs transition-colors ${
+                                columnResizeMode === option.value
+                                  ? 'border-blue-200 bg-blue-50 text-blue-700'
+                                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                              }`}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+                          Resize Direction
+                        </p>
+                        <div className="flex gap-2">
+                          {([
+                            { value: 'ltr' as const, label: 'Left to right' },
+                            { value: 'rtl' as const, label: 'Right to left' },
+                          ]).map((option) => (
+                            <button
+                              key={option.value}
+                              type="button"
+                              onClick={() => onColumnResizeDirectionChange(option.value)}
+                              className={`rounded-md border px-2.5 py-1.5 text-xs transition-colors ${
+                                columnResizeDirection === option.value
+                                  ? 'border-blue-200 bg-blue-50 text-blue-700'
+                                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                              }`}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8 text-xs"
+                        onClick={() => table.resetColumnSizing()}
+                      >
+                        Reset all column widths
+                      </Button>
+                    </div>
                   </div>
 
                 </div>
